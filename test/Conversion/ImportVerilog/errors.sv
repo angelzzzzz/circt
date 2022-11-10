@@ -36,15 +36,7 @@ endmodule
 
 // -----
 
-module Foo(
-  // expected-error @below {{unsupported module port}}
-  input a
-);
-endmodule
-
-// -----
-
-// expected-error @below {{unsupported construct}}
+// expected-error @below {{unsupported top-level construct}}
 package Foo;
 endpackage
 
