@@ -46,6 +46,13 @@ module Basic;
   int v1;
   int v2 = v1;
 
+  // CHECK: %n0 = moore.net "wire" : !moore.logic
+  // CHECK: %n1 = moore.net "tri" : !moore.logic
+  // CHECK: %n2 = moore.net "wire" : !moore.int
+  wire n0;
+  tri n1;
+  wire integer n2;
+
   // CHECK: moore.procedure initial {
   // CHECK: }
   initial;
@@ -262,6 +269,30 @@ module Expressions;
     // CHECK: [[TMP:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
     // CHECK: moore.not [[TMP]] : !moore.bit
     x = !a;
+    // CHECK: [[PRE:%.+]] = moore.read_lvalue %a : !moore.int
+    // CHECK: [[TMP:%.+]] = moore.constant 1 : !moore.int
+    // CHECK: [[POST:%.+]] = moore.add [[PRE]], [[TMP]] : !moore.int
+    // CHECK: moore.blocking_assign %a, [[POST]]
+    // CHECK: moore.blocking_assign %c, [[PRE]]
+    c = a++;
+    // CHECK: [[PRE:%.+]] = moore.read_lvalue %a : !moore.int
+    // CHECK: [[TMP:%.+]] = moore.constant 1 : !moore.int
+    // CHECK: [[POST:%.+]] = moore.sub [[PRE]], [[TMP]] : !moore.int
+    // CHECK: moore.blocking_assign %a, [[POST]]
+    // CHECK: moore.blocking_assign %c, [[PRE]]
+    c = a--;
+    // CHECK: [[PRE:%.+]] = moore.read_lvalue %a : !moore.int
+    // CHECK: [[TMP:%.+]] = moore.constant 1 : !moore.int
+    // CHECK: [[POST:%.+]] = moore.add [[PRE]], [[TMP]] : !moore.int
+    // CHECK: moore.blocking_assign %a, [[POST]]
+    // CHECK: moore.blocking_assign %c, [[POST]]
+    c = ++a;
+    // CHECK: [[PRE:%.+]] = moore.read_lvalue %a : !moore.int
+    // CHECK: [[TMP:%.+]] = moore.constant 1 : !moore.int
+    // CHECK: [[POST:%.+]] = moore.sub [[PRE]], [[TMP]] : !moore.int
+    // CHECK: moore.blocking_assign %a, [[POST]]
+    // CHECK: moore.blocking_assign %c, [[POST]]
+    c = --a;
 
     //===------------------------------------------------------------------===//
     // Binary operators
@@ -359,6 +390,58 @@ module Expressions;
     c = a >>> b;
     // CHECK: moore.shr %u, %b : !moore.int<unsigned>, !moore.int
     c = u >>> b;
+
+    //===------------------------------------------------------------------===//
+    // Assign operators
+
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.add [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a += b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.sub [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a -= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.mul [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a *= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %f
+    // CHECK: [[TMP2:%.+]] = moore.div [[TMP1]], %d
+    // CHECK: moore.blocking_assign %f, [[TMP2]]
+    f /= d;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %f
+    // CHECK: [[TMP2:%.+]] = moore.mod [[TMP1]], %d
+    // CHECK: moore.blocking_assign %f, [[TMP2]]
+    f %= d;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.and [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a &= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.or [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a |= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.xor [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a ^= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.shl [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a <<= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.shl [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a <<<= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.shr [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a >>= b;
+    // CHECK: [[TMP1:%.+]] = moore.read_lvalue %a
+    // CHECK: [[TMP2:%.+]] = moore.ashr [[TMP1]], %b
+    // CHECK: moore.blocking_assign %a, [[TMP2]]
+    a >>>= b;
   end
 endmodule
 
