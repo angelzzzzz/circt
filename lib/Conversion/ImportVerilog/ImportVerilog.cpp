@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "circt/Conversion/ImportVerilog.h"
-#include "mlir/IR/BuiltinOps.h"
+#include "ImportVerilogInternals.h"
+#include "circt/Dialect/Moore/MooreDialect.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Verifier.h"
@@ -28,6 +28,7 @@
 
 using namespace mlir;
 using namespace circt;
+using namespace ImportVerilog;
 
 using llvm::SourceMgr;
 
@@ -47,10 +48,10 @@ std::string circt::getSlangVersion() {
 //===----------------------------------------------------------------------===//
 
 /// Convert a slang `SourceLocation` to an MLIR `Location`.
-static Location
-convertLocation(MLIRContext *context, const slang::SourceManager &sourceManager,
-                SmallDenseMap<slang::BufferID, StringRef> &bufferFilePaths,
-                slang::SourceLocation loc) {
+Location ImportVerilog::convertLocation(
+    MLIRContext *context, const slang::SourceManager &sourceManager,
+    SmallDenseMap<slang::BufferID, StringRef> &bufferFilePaths,
+    slang::SourceLocation loc) {
   if (loc && loc.buffer() != slang::SourceLocation::NoLocation.buffer()) {
     auto fileName = bufferFilePaths.lookup(loc.buffer());
     auto line = sourceManager.getLineNumber(loc);
@@ -58,6 +59,11 @@ convertLocation(MLIRContext *context, const slang::SourceManager &sourceManager,
     return FileLineColLoc::get(context, fileName, line, column);
   }
   return UnknownLoc::get(context);
+}
+
+Location Context::convertLocation(slang::SourceLocation loc) {
+  return ImportVerilog::convertLocation(getContext(), sourceManager,
+                                        bufferFilePaths, loc);
 }
 
 namespace {
@@ -98,7 +104,8 @@ public:
 
   /// Convert a slang `SourceLocation` to an MLIR `Location`.
   Location convertLocation(slang::SourceLocation loc) const {
-    return ::convertLocation(context, *sourceManager, bufferFilePaths, loc);
+    return ImportVerilog::convertLocation(context, *sourceManager,
+                                          bufferFilePaths, loc);
   }
 
   static DiagnosticSeverity getSeverity(slang::DiagnosticSeverity severity) {
@@ -236,8 +243,31 @@ LogicalResult ImportContext::prepareDriver(SourceMgr &sourceMgr) {
 /// Parse and elaborate the prepared source files, and populate the given MLIR
 /// `module` with corresponding operations.
 LogicalResult ImportContext::importVerilog(ModuleOp module) {
-  // This is where the Slang AST to CIRCT op conversion will go.
-  return success();
+  // Parse the input.
+  auto parseTimer = ts.nest("Verilog parser");
+  bool parseSuccess = driver.parseAllSources();
+  parseTimer.stop();
+
+  // Elaborate the input.
+  auto compileTimer = ts.nest("Verilog elaboration");
+  auto compilation = driver.createCompilation();
+  for (auto &diag : compilation->getAllDiagnostics())
+    driver.diagEngine.issue(diag);
+  if (!parseSuccess || driver.diagEngine.getNumErrors() > 0)
+    return failure();
+  compileTimer.stop();
+
+  // Traverse the parsed Verilog AST and map it to the equivalent CIRCT ops.
+  mlirContext->loadDialect<moore::MooreDialect, scf::SCFDialect>();
+  auto conversionTimer = ts.nest("Verilog to dialect mapping");
+  Context context(module, driver.sourceManager, bufferFilePaths);
+  if (failed(context.convertCompilation(*compilation)))
+    return failure();
+  conversionTimer.stop();
+
+  // Run the verifier on the constructed module to ensure it is clean.
+  auto verifierTimer = ts.nest("Post-parse verification");
+  return verify(module);
 }
 
 /// Preprocess the prepared source files and print them to the given output
@@ -338,4 +368,17 @@ LogicalResult circt::preprocessVerilog(SourceMgr &sourceMgr,
       return failure();
     return context.preprocessVerilog(os);
   });
+}
+
+void circt::registerFromVerilogTranslation() {
+  static TranslateToMLIRRegistration fromVerilog(
+      "import-verilog", "import Verilog or SystemVerilog",
+      [](llvm::SourceMgr &sourceMgr, MLIRContext *context) {
+        TimingScope ts;
+        OwningOpRef<ModuleOp> module(
+            ModuleOp::create(UnknownLoc::get(context)));
+        if (failed(importVerilog(sourceMgr, context, ts, module.get())))
+          module = {};
+        return module;
+      });
 }
