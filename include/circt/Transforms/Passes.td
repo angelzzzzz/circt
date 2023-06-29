@@ -100,4 +100,12 @@ def MaximizeSSA : Pass<"maximize-ssa", "::mlir::ModuleOp"> {
   let constructor = "circt::createMaximizeSSAPass()";
 }
 
+def PrintKnownValues : Pass<"print-known-values", "::mlir::ModuleOp"> {
+  let summary = "Analyze known values and print them";
+  let constructor = "circt::createPrintKnownValuesPass()";
+  let options = [
+    Option<"topModuleName", "module", "std::string", /*default=*/"",
+           "Only show known values in the specified top-level module."> ];
+}
+
 #endif // CIRCT_TRANSFORMS_PASSES
