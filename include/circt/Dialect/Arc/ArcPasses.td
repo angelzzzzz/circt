@@ -292,4 +292,10 @@ def StripSV : Pass<"arc-strip-sv", "mlir::ModuleOp"> {
                            "hw::HWDialect", "seq::SeqDialect"];
 }
 
+def VectorizeStates : Pass<"arc-vectorize-states", "mlir::ModuleOp"> {
+  let constructor = "circt::arc::createVectorizeStatesPass()";
+  let dependentDialects = [
+    "arc::ArcDialect", "comb::CombDialect", "hw::HWDialect"];
+}
+
 #endif // CIRCT_DIALECT_ARC_ARCPASSES_TD

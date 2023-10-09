@@ -52,6 +52,7 @@ createPrintStateInfoPass(llvm::StringRef stateFile = "");
 std::unique_ptr<mlir::Pass> createSimplifyVariadicOpsPass();
 std::unique_ptr<mlir::Pass> createSplitLoopsPass();
 std::unique_ptr<mlir::Pass> createStripSVPass();
+std::unique_ptr<mlir::Pass> createVectorizeStatesPass();
 
 #define GEN_PASS_REGISTRATION
 #include "circt/Dialect/Arc/ArcPasses.h.inc"

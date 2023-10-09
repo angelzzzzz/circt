@@ -108,6 +108,9 @@ static cl::opt<bool> shouldInline("inline", cl::desc("Inline arcs"),
 static cl::opt<bool> shouldDedup("dedup", cl::desc("Deduplicate arcs"),
                                  cl::init(true), cl::cat(mainCategory));
 
+static cl::opt<bool> shouldVectorize("vectorize", cl::desc("Vectorize arcs"),
+                                     cl::init(false), cl::cat(mainCategory));
+
 static cl::opt<bool>
     shouldMakeLUTs("lookup-tables",
                    cl::desc("Optimize arcs into lookup tables"), cl::init(true),
@@ -260,6 +263,12 @@ static void populatePipeline(PassManager &pm) {
   // Removing some muxes etc. may lead to additional dedup opportunities
   // if (shouldDedup)
   // pm.addPass(arc::createDedupPass());
+
+  if (shouldVectorize) {
+    pm.addPass(arc::createVectorizeStatesPass());
+    pm.addPass(arc::createLowerVectorizationsPass(
+        arc::LowerVectorizationsModeEnum::Full));
+  }
 
   // Lower stateful arcs into explicit state reads and writes.
   if (untilReached(UntilStateLowering))
