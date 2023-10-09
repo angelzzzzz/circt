@@ -249,7 +249,8 @@ void HierarchyAnalysis::run() {
           foldPartialResults.push_back(cast<Value>(folded));
       }
     }
-    assert(foldPartialResults.size() == op->getNumResults());
+    if (foldPartialResults.size() != op->getNumResults())
+      continue;
 
     // Record the updated values.
     for (auto [result, folded] :
