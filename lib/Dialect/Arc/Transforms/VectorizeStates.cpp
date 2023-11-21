@@ -146,6 +146,123 @@ struct DenseMapInfo<StateFingerprint> {
 } // namespace llvm
 
 namespace {
+
+struct PullSelfUsesIntoBodyPattern : public OpRewritePattern<VectorizeOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(VectorizeOp vecOp,
+                                PatternRewriter &rewriter) const override {
+    // Find operands of the vectorize op that are trivially the op's results.
+    auto &body = vecOp.getBodyBlock();
+    BitVector argsToRemove(body.getNumArguments());
+    auto retOp = cast<VectorizeReturnOp>(body.getTerminator());
+    for (auto [input, arg] :
+         llvm::zip(vecOp.getInputs(), body.getArguments())) {
+      if (input != vecOp.getResults())
+        continue;
+      arg.replaceAllUsesWith(retOp.getValue());
+      argsToRemove.set(arg.getArgNumber());
+    }
+    if (argsToRemove.none())
+      return failure();
+
+    // Remove the obsolete arguments.
+    body.eraseArguments(argsToRemove);
+    SmallVector<ValueRange> newOperands;
+    for (auto [index, operands] : llvm::enumerate(vecOp.getInputs()))
+      if (!argsToRemove[index])
+        newOperands.push_back(operands);
+    auto newVecOp = rewriter.create<VectorizeOp>(
+        vecOp.getLoc(), vecOp.getResultTypes(), newOperands);
+    newVecOp.getBody().takeBody(vecOp.getBody());
+    vecOp.replaceAllUsesWith(newVecOp);
+    rewriter.eraseOp(vecOp);
+    return success();
+  }
+};
+
+struct InlineTrivialResultsPattern : public OpRewritePattern<VectorizeOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(VectorizeOp vecOp,
+                                PatternRewriter &rewriter) const override {
+    using Key = std::tuple<StringAttr, unsigned, Value, Value, Value>;
+
+    std::optional<Key> commonKey;
+    for (auto result : vecOp.getResults()) {
+      if (!result.hasOneUse())
+        return failure();
+      auto &use = *result.use_begin();
+      auto stateOp = dyn_cast<StateOp>(use.getOwner());
+      if (!stateOp)
+        return failure();
+      if (stateOp.getNumOperands() != 1)
+        return failure();
+      if (stateOp.getNumResults() != 1)
+        return failure();
+      Key key = std::make_tuple(stateOp.getArcAttr().getAttr(),
+                                stateOp.getLatency(), stateOp.getClock(),
+                                stateOp.getEnable(), stateOp.getReset());
+      if (!commonKey)
+        commonKey = key;
+      else if (*commonKey != key)
+        return failure();
+    }
+
+    auto *termOp = vecOp.getBodyBlock().getTerminator();
+    IRMapping mapping;
+    mapping.map(vecOp.getResults()[0], termOp->getOperand(0));
+
+    OpBuilder builder(termOp);
+    auto *movedOp =
+        builder.clone(*vecOp.getResults()[0].use_begin()->getOwner(), mapping);
+    termOp->setOperand(0, movedOp->getResult(0));
+
+    for (auto result : vecOp.getResults()) {
+      result.setType(movedOp->getResult(0).getType());
+      auto *resultOp = result.use_begin()->getOwner();
+      resultOp->getResult(0).replaceAllUsesWith(result);
+      rewriter.eraseOp(resultOp);
+    }
+
+    return success();
+  }
+};
+
+struct InlineTrivialOperandsPattern : public OpRewritePattern<VectorizeOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(VectorizeOp vecOp,
+                                PatternRewriter &rewriter) const override {
+    using Key = std::tuple<OperationName, TypeRange, TypeRange, DictionaryAttr>;
+
+    for (unsigned argIdx = vecOp.getInputs().size(); argIdx > 0;) {
+      --argIdx;
+      auto inputs = vecOp.getInputs()[argIdx];
+
+      std::optional<Key> commonKey;
+      for (auto input : inputs) {
+        if (!input.hasOneUse())
+          return failure();
+        auto *defOp = input.getDefiningOp();
+        if (!defOp)
+          return failure();
+        Key key = std::make_tuple(defOp->getName(), defOp->getResultTypes(),
+                                  defOp->getOperandTypes(),
+                                  defOp->getAttrDictionary());
+        if (!commonKey)
+          commonKey = key;
+        else if (*commonKey != key)
+          return failure();
+      }
+
+      LLVM_DEBUG(llvm::dbgs() << "  - Can pull arg #" << argIdx << " "
+                              << inputs[0] << " into " << vecOp << "\n");
+    }
+    return failure();
+  }
+};
+
+} // namespace
+
+namespace {
 struct BlockVectorizer {
   Block *block;
   SymbolTable &symtbl;
@@ -186,14 +303,25 @@ LogicalResult BlockVectorizer::vectorize() {
   if (failed(order.compute(block)))
     return failure();
   // DEBUG: Annotate topo order.
-  for (auto [op, rank] : order.opRanks)
-    op->setAttr("rank", IntegerAttr::get(IntegerType::get(context, 64), rank));
+  // for (auto [op, rank] : order.opRanks)
+  //   op->setAttr("rank", IntegerAttr::get(IntegerType::get(context, 64),
+  //   rank));
 
   if (failed(createInitialVectorizeOps()))
     return failure();
 
-  if (failed(vectorizeArcs()))
-    return failure();
+  // Optimize vectorize ops.
+  RewritePatternSet patterns(context);
+  patterns.add<PullSelfUsesIntoBodyPattern, InlineTrivialResultsPattern,
+               InlineTrivialOperandsPattern>(context);
+
+  if (failed(applyPatternsAndFoldGreedily(*block->getParent(),
+                                          std::move(patterns))))
+    return block->getParentOp()->emitError(
+        "vectorization optimizer did not converge");
+
+  // if (failed(vectorizeArcs()))
+  //   return failure();
 
   return success();
 }

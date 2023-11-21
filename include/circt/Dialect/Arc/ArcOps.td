@@ -652,8 +652,10 @@ def IntOr1DVectorOfInt : AnyTypeOf<[
 ]>;
 
 def VectorizeOp : ArcOp<"vectorize", [
-    IsolatedFromAbove, RecursiveMemoryEffects
-  ]> {
+  IsolatedFromAbove,
+  RecursiveMemoryEffects,
+  RegionKindInterface,
+]> {
   let summary = "isolated subgraph of operations to be vectorized";
   let description = [{
     This operation represents a vectorized computation DAG. It places a
@@ -787,6 +789,12 @@ def VectorizeOp : ArcOp<"vectorize", [
     /// they are a vectorized version of the boundary types (i.e., a matching
     /// vector type or integer with summed-up bitwidth).
     bool isBodyVectorized();
+
+    static mlir::RegionKind getRegionKind(unsigned index) {
+      return mlir::RegionKind::Graph;
+    }
+
+    mlir::Block &getBodyBlock() { return getBody().front(); }
   }];
 
   let hasVerifier = 1;
