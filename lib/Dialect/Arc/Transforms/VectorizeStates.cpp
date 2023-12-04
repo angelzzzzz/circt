@@ -28,6 +28,7 @@ namespace arc {
 
 using namespace circt;
 using namespace arc;
+using llvm::MapVector;
 using llvm::SmallMapVector;
 using llvm::SmallSetVector;
 
@@ -263,6 +264,22 @@ struct InlineTrivialOperandsPattern : public OpRewritePattern<VectorizeOp> {
 } // namespace
 
 namespace {
+struct Lane;
+
+struct Group {
+  unsigned id;
+  llvm::simple_ilist<Lane> lanes;
+};
+
+struct Lane : public llvm::ilist_node<Lane> {
+  Group *group;
+  SmallSetVector<Operation *, 4> ops;
+  SmallSetVector<Lane *, 2> incoming;
+  SmallSetVector<Lane *, 2> outgoing;
+};
+} // namespace
+
+namespace {
 struct BlockVectorizer {
   Block *block;
   SymbolTable &symtbl;
@@ -273,6 +290,7 @@ struct BlockVectorizer {
 
   BlockVectorizer(Block *block, SymbolTable &symtbl)
       : block(block), symtbl(symtbl) {}
+  LogicalResult run();
   LogicalResult vectorize();
   LogicalResult createInitialVectorizeOps();
   LogicalResult vectorizeArcs();
@@ -295,6 +313,180 @@ struct BlockVectorizer {
   // }
 };
 } // namespace
+
+static bool isLeafOp(Operation *op) {
+  if (isa<MemoryWriteOp, MemoryWritePortOp, StateWriteOp, hw::InstanceOp>(op))
+    return true;
+  if (auto stateOp = dyn_cast<StateOp>(op))
+    if (stateOp.getLatency() > 0)
+      return true;
+  return false;
+}
+
+LogicalResult BlockVectorizer::run() {
+  LLVM_DEBUG(llvm::dbgs() << "Vectorizing block " << block << "\n");
+
+  // Compute a topological order for the operations in the block.
+  auto opIt = block->begin();
+  DenseMap<Operation *, unsigned> rankForOp;
+  SmallMapVector<Operation *, Operation::user_iterator, 16> worklist;
+  unsigned maxRank = 0;
+  while (!worklist.empty() || opIt != block->end()) {
+    if (worklist.empty()) {
+      auto *op = &*(opIt++);
+      if (rankForOp.contains(op))
+        continue;
+      worklist.insert({op, isLeafOp(op) ? op->user_end() : op->user_begin()});
+    }
+    auto &[op, userIt] = worklist.back();
+    if (userIt == op->user_end()) {
+      unsigned rank = 0;
+      if (!isLeafOp(op))
+        for (auto *user : op->getUsers())
+          rank = std::max(rank, rankForOp.lookup(user) + 1);
+      rankForOp.insert({op, rank});
+      worklist.pop_back();
+      maxRank = std::max(maxRank, rank);
+      continue;
+    }
+    auto *user = *(userIt++);
+    if (!rankForOp.contains(user))
+      if (!worklist
+               .insert({user,
+                        isLeafOp(user) ? user->user_end() : user->user_begin()})
+               .second)
+        return op->emitError("dependency cycle");
+  }
+  LLVM_DEBUG(llvm::dbgs() << "- " << maxRank << " ranks among "
+                          << rankForOp.size() << " ops\n");
+
+  // Group operations by fingerprint and rank.
+  using Key = std::tuple<OperationName, Attribute, unsigned, unsigned, unsigned,
+                         Value, Value, Value>;
+  auto getKey = [&](Operation *op) -> Key {
+    std::array<Value, 3> values;
+    if (auto stateOp = dyn_cast<StateOp>(op)) {
+      values[0] = stateOp.getClock();
+      values[1] = stateOp.getReset();
+      values[2] = stateOp.getEnable();
+    } else if (auto writeOp = dyn_cast<MemoryWritePortOp>(op)) {
+      values[0] = writeOp.getClock();
+    }
+    return {op->getName(),
+            op->getAttrDictionary(),
+            op->getNumResults(),
+            op->getNumOperands(),
+            rankForOp.lookup(op),
+            values[0],
+            values[1],
+            values[2]};
+  };
+  MapVector<Key, SmallVector<Operation *, 2>> opsByKey;
+  for (auto &op : *block)
+    opsByKey[getKey(&op)].push_back(&op);
+  LLVM_DEBUG(llvm::dbgs() << "- " << opsByKey.size() << " groups\n");
+  unsigned count = 0;
+  for (auto &[key, ops] : opsByKey)
+    if (ops.size() > 1)
+      ++count;
+  LLVM_DEBUG(llvm::dbgs() << "- " << count << " non-trivial groups\n");
+
+  // Create the initial groups and lanes.
+  llvm::SpecificBumpPtrAllocator<Group> allocGroups;
+  llvm::SpecificBumpPtrAllocator<Lane> allocLanes;
+  SmallVector<Group *, 0> groups;
+  DenseMap<Operation *, Lane *> lanesForOp2;
+
+  for (auto &[key, ops] : opsByKey) {
+    auto *group = new (allocGroups.Allocate()) Group();
+    group->id = groups.size();
+    groups.push_back(group);
+
+    for (auto *op : ops) {
+      auto *lane = new (allocLanes.Allocate()) Lane();
+      lane->group = group;
+      lane->ops.insert(op);
+      group->lanes.push_back(*lane);
+      lanesForOp2.insert({op, lane});
+    }
+  }
+
+  for (auto *group : groups) {
+    for (auto &lane : group->lanes) {
+      for (auto *op : lane.ops) {
+        for (auto operand : op->getOperands()) {
+          auto *otherLane = lanesForOp2.lookup(operand.getDefiningOp());
+          if (!otherLane)
+            continue;
+          lane.incoming.insert(otherLane);
+          otherLane->outgoing.insert(&lane);
+        }
+      }
+    }
+  }
+
+  // Dump the groups as a graph.
+  std::error_code ec;
+  llvm::raw_fd_ostream os("graph.dot", ec);
+
+  os << "digraph {\n";
+  for (auto *group : groups) {
+    os << "g" << group->id << " [label=\"" << group->lanes.size() << " x "
+       << group->lanes.front().ops.size() << "\"];\n";
+  }
+  for (auto *group : groups) {
+    SmallMapVector<Group *, unsigned, 8> incoming;
+    for (auto &lane : group->lanes)
+      for (auto *otherLane : lane.incoming)
+        ++incoming[otherLane->group];
+    for (auto [otherGroup, count] : incoming)
+      os << "g" << otherGroup->id << " -> g" << group->id << " [label=\""
+         << count << "\"];\n";
+  }
+  os << "}\n";
+
+  // Explore if we can organize operations into vector lanes.
+  using Lane = std::pair<unsigned, unsigned>; // (leafOpId, lane)
+  DenseMap<Operation *, llvm::SmallDenseSet<Lane, 2>> lanesForOp;
+  unsigned leafOpId = 0;
+  for (auto &[key, ops] : opsByKey) {
+    if (std::get<4>(key) != 0)
+      continue;
+    for (auto [index, op] : llvm::enumerate(ops))
+      lanesForOp[op].insert({leafOpId, index});
+    ++leafOpId;
+  }
+  for (unsigned rank = 1; rank < maxRank; ++rank) {
+    for (auto &[key, ops] : opsByKey) {
+      if (std::get<4>(key) != rank)
+        continue;
+      for (auto *op : ops) {
+        llvm::SmallDenseSet<Lane, 2> lanes;
+        for (auto *user : op->getUsers())
+          for (auto lane : lanesForOp[user])
+            lanes.insert(lane);
+        lanesForOp[op] = lanes;
+      }
+    }
+  }
+
+  // Annotate the lanes.
+  for (auto &op : *block) {
+    auto &laneSet = lanesForOp[&op];
+    SmallVector<Lane> lanes;
+    lanes.assign(laneSet.begin(), laneSet.end());
+    llvm::sort(lanes);
+    if (lanes.empty())
+      continue;
+    SmallVector<Attribute> attrs;
+    for (auto lane : lanes)
+      attrs.push_back(StringAttr::get(op.getContext(), Twine(lane.first) + "," +
+                                                           Twine(lane.second)));
+    op.setAttr("lanes", ArrayAttr::get(op.getContext(), attrs));
+  }
+
+  return success();
+}
 
 LogicalResult BlockVectorizer::vectorize() {
   LLVM_DEBUG(llvm::dbgs() << "- Vectorizing block " << block << "\n");
@@ -769,7 +961,7 @@ void VectorizeStatesPass::runOnOperation() {
                             << moduleOp.getModuleNameAttr() << "\n");
     auto result = moduleOp.walk([&](Block *block) {
       if (!mayHaveSSADominance(*block->getParent()))
-        if (failed(BlockVectorizer(block, symtbl).vectorize()))
+        if (failed(BlockVectorizer(block, symtbl).run()))
           return WalkResult::interrupt();
       return WalkResult::advance();
     });
