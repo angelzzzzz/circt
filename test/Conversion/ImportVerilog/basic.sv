@@ -81,13 +81,15 @@ module Expressions();
 
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int
+    // CHECK: [[PREVALUE:%.+]] = moore.variable %a : !moore.int
     // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, %a
+    // CHECK: moore.mir.bpassign %c, [[PREVALUE]]
     c = a++;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.sub %a, [[TMP1]] : !moore.int
+    // CHECK: [[PREVALUE:%.+]] = moore.variable name "preValue" %a : !moore.int
     // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, %a
+    // CHECK: moore.mir.bpassign %c, [[PREVALUE]]
     c = a--;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int

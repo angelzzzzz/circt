@@ -114,6 +114,10 @@ struct ExprVisitor {
     auto postValue =
         isInc ? builder.create<moore::AddOp>(loc, preValue, one).getResult()
               : builder.create<moore::SubOp>(loc, preValue, one).getResult();
+    if (isPost) {
+      preValue = builder.create<moore::VariableOp>(loc, preValue.getType(),
+                                                   "preValue", arg);
+    }
     builder.create<moore::BPAssignOp>(loc, arg, postValue);
     return isPost ? preValue : postValue;
   }
