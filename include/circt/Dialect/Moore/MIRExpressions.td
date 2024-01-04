@@ -133,14 +133,15 @@ def ShrOp : ShiftOp<"shr"> {
 
 class EqualOp<string name> : MIROp<name, [
   Pure,
-  Commutative
+  Commutative,
+  SameTypeOperands
 ]> {
   let arguments = (ins SimpleBitVectorType:$lhs,
                        SimpleBitVectorType:$rhs,
                        UnitAttr:$mode);
   let results = (outs I1:$result);
   let assemblyFormat = [{
-    ( `case` $mode^ )? $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs)
+    ( `case` $mode^ )? $lhs `,` $rhs attr-dict `:` functional-type($lhs,$result)
   }];
 }
 

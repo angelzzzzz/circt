@@ -182,6 +182,17 @@ module Expressions();
     c = a <<< b;
     // CHECK: moore.mir.shr arithmetic %a, %b : !moore.int, !moore.int
     c = a >>> b;
+
+    // CHECK: [[TMP1:%.+]] = moore.gt %a, %b : !moore.int -> !moore.bit
+    // CHECK: [[TMP2:%.+]] = moore.constant false : !moore.bit
+    // CHECK: [[TMP3:%.+]] = moore.mir.ne [[TMP1]], [[TMP2]] : (!moore.bit) -> i1
+    // CHECK: [[TMP4:%.+]] = scf.if [[TMP3]] -> (!moore.int) {
+    // CHECK:   scf.yield %a : !moore.int
+    // CHECK: } else {
+    // CHECK:   scf.yield %b : !moore.int
+    // CHECK: }
+    // CHECK: moore.mir.bpassign %c, [[TMP4]] : !moore.int
+    c = a > b ? a : b;
   end
 endmodule
 
@@ -241,7 +252,7 @@ module Statements();
 
   initial begin
     // CHECK: [[ZERO:%.+]] = moore.constant 0 : !moore.int
-    // CHECK: [[COND:%.+]] = moore.mir.ne %a, [[ZERO]] : !moore.int, !moore.int
+    // CHECK: [[COND:%.+]] = moore.mir.ne %a, [[ZERO]] : (!moore.int) -> i1
     // CHECK: scf.if [[COND]]
     if (a)
       ;

@@ -271,6 +271,28 @@ struct ExprVisitor {
     return {};
   }
 
+  Value visit(const slang::ast::ConditionalExpression &expr) {
+    auto type = context.convertType(*expr.conditions.begin()->expr->type);
+    Value cond = context.convertExpression(*expr.conditions.begin()->expr);
+    if (!cond)
+      return {};
+    if (!cond.getType().isa<mlir::IntegerType>()) {
+      auto zeroValue = builder.create<moore::ConstantOp>(loc, type, 0);
+      cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
+    }
+    auto ifOp = builder.create<mlir::scf::IfOp>(
+        loc, cond,
+        [&](OpBuilder &builder, Location loc) {
+          builder.create<mlir::scf::YieldOp>(
+              loc, context.convertExpression(expr.left()));
+        },
+        [&](OpBuilder &builder, Location loc) {
+          builder.create<mlir::scf::YieldOp>(
+              loc, context.convertExpression(expr.right()));
+        });
+    return ifOp.getResult(0);
+  }
+
   Value visit(const slang::ast::IntegerLiteral &expr) {
     // TODO: This is wildly unsafe and breaks for anything larger than 32 bits.
     auto value = expr.getValue().as<uint32_t>().value();
