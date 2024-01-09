@@ -273,7 +273,8 @@ struct ExprVisitor {
 
   Value visit(const slang::ast::ConditionalExpression &expr) {
     auto type = context.convertType(*expr.conditions.begin()->expr->type);
-    Value cond = context.convertExpression(*expr.conditions.begin()->expr);
+    Value cond = convertToSimpleBitVector(
+        context.convertExpression(*expr.conditions.begin()->expr));
     if (!cond)
       return {};
     if (!cond.getType().isa<mlir::IntegerType>()) {
@@ -291,6 +292,42 @@ struct ExprVisitor {
               loc, context.convertExpression(expr.right()));
         });
     return ifOp.getResult(0);
+  }
+
+  Value
+  createInside(nonstd::span<const slang::ast::Expression *const> &rangeList,
+               unsigned long startIndex, Value lhs, Location loc, Type type) {
+    if (startIndex >= rangeList.size()) {
+      auto falseValue = builder.create<moore::ConstantOp>(loc, type, 0);
+      return falseValue;
+    }
+    auto member = convertToSimpleBitVector(
+        context.convertExpression(*rangeList[startIndex]));
+    Value cond = builder.create<moore::EqualityOp>(loc, lhs, member);
+    if (!cond.getType().isa<mlir::IntegerType>()) {
+      auto zeroValue = builder.create<moore::ConstantOp>(loc, type, 0);
+      cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
+    }
+    auto ifOp = builder.create<mlir::scf::IfOp>(
+        loc, cond,
+        [&](OpBuilder &builder, Location loc) {
+          Value trueValue = builder.create<moore::ConstantOp>(loc, type, 1);
+          builder.create<mlir::scf::YieldOp>(loc, trueValue);
+        },
+        [&](OpBuilder &builder, Location loc) {
+          auto result = createInside(rangeList, startIndex + 1, lhs, loc, type);
+          builder.create<mlir::scf::YieldOp>(loc, result);
+        });
+    return ifOp.getResult(0);
+  }
+
+  Value visit(const slang::ast::InsideExpression &expr) {
+    auto lhs = convertToSimpleBitVector(context.convertExpression(expr.left()));
+    auto rangeList = expr.rangeList();
+    if (!lhs || rangeList.empty())
+      return {};
+    auto type = context.convertType(*expr.type);
+    return createInside(rangeList, 0, lhs, loc, type);
   }
 
   Value visit(const slang::ast::IntegerLiteral &expr) {

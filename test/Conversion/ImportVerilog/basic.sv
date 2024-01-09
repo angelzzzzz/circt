@@ -193,6 +193,26 @@ module Expressions();
     // CHECK: }
     // CHECK: moore.mir.bpassign %c, [[TMP4]] : !moore.int
     c = a > b ? a : b;
+
+    // CHECK: [[TMP1:%.+]] = moore.mir.eq %a, %a : (!moore.int) -> i1
+    // CHECK: [[TMP2:%.+]] = scf.if [[TMP1]] -> (!moore.logic) {
+    // CHECK:   [[TMP5:%.+]] = moore.constant true : !moore.logic
+    // CHECK:   scf.yield [[TMP5]] : !moore.logic
+    // CHECK: } else {
+    // CHECK:   [[TMP5:%.+]] = moore.mir.eq %a, %b : (!moore.int) -> i1
+    // CHECK:   [[TMP6:%.+]] = scf.if [[TMP5]] -> (!moore.logic) {
+    // CHECK:     [[TMP7:%.+]] = moore.constant true : !moore.logic
+    // CHECK:     scf.yield [[TMP7]] : !moore.logic
+    // CHECK:   } else {
+    // CHECK:     [[TMP7:%.+]] = moore.constant false : !moore.logic
+    // CHECK:     scf.yield [[TMP7]] : !moore.logic
+    // CHECK:   }
+    // CHECK:   scf.yield [[TMP6]] : !moore.logic
+    // CHECK: }
+    // CHECK: [[TMP3:%.+]] = moore.conversion [[TMP2]] : !moore.logic -> !moore.packed<range<logic, 31:0>>
+    // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.packed<range<logic, 31:0>> -> !moore.int
+    // CHECK: moore.mir.bpassign %c, [[TMP4]] : !moore.int
+    c = a inside {a, b};
   end
 endmodule
 
