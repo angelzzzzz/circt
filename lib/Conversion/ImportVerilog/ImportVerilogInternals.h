@@ -63,6 +63,13 @@ struct Context {
   LogicalResult
   visitConditionalStmt(const slang::ast::ConditionalStatement *conditionalStmt);
 
+  LogicalResult
+  createCase(Value caseExpr,
+             nonstd::span<slang::ast::CaseStatement::ItemGroup const> &items,
+             const slang::ast::Statement *defaultCase, unsigned long itemIndex,
+             unsigned long exprIndex, Location loc, Type type);
+  LogicalResult visitCaseStmt(const slang::ast::CaseStatement *caseStmt);
+
   // Convert a slang expression into an MLIR expression.
   Value convertExpression(const slang::ast::Expression &expr);
 

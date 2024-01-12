@@ -54,6 +54,55 @@ LogicalResult Context::visitConditionalStmt(
   return success();
 }
 
+LogicalResult Context::createCase(
+    Value caseExpr,
+    nonstd::span<slang::ast::CaseStatement::ItemGroup const> &items,
+    const slang::ast::Statement *defaultCase, unsigned long itemIndex,
+    unsigned long exprIndex, Location loc, Type type) {
+  if (itemIndex >= items.size()) {
+    return convertStatement(defaultCase);
+  }
+  auto itemExpr = convertExpression(*items[itemIndex].expressions[exprIndex]);
+  auto itemStmt = items[itemIndex].stmt;
+  Value cond = builder.create<moore::EqualityOp>(loc, caseExpr, itemExpr);
+  if (!cond.getType().isa<mlir::IntegerType>()) {
+    auto zeroValue = builder.create<moore::ConstantOp>(loc, type, 0);
+    cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
+  }
+
+  auto ifOp = builder.create<mlir::scf::IfOp>(
+      loc, cond, itemIndex < (items.size() - 1) || defaultCase != nullptr);
+  OpBuilder::InsertionGuard guard(builder);
+
+  builder.setInsertionPoint(ifOp.thenYield());
+  if (failed(convertStatement(itemStmt)))
+    return failure();
+
+  if (itemIndex < (items.size() - 1) || defaultCase != nullptr) {
+    builder.setInsertionPoint(ifOp.elseYield());
+    if (exprIndex < (items[itemIndex].expressions.size() - 1)) {
+      return createCase(caseExpr, items, defaultCase, itemIndex, exprIndex + 1,
+                        loc, type);
+    }
+
+    return createCase(caseExpr, items, defaultCase, itemIndex + 1, 0, loc,
+                      type);
+  }
+  return success();
+}
+
+LogicalResult
+Context::visitCaseStmt(const slang::ast::CaseStatement *caseStmt) {
+  auto loc = convertLocation(caseStmt->sourceRange.start());
+  auto type = convertType(*caseStmt->expr.type);
+  auto caseExpr = convertExpression(caseStmt->expr);
+  auto items = caseStmt->items;
+  const auto *defaultCase = caseStmt->defaultCase;
+  if (!caseExpr || items.empty())
+    return failure();
+  return createCase(caseExpr, items, defaultCase, 0, 0, loc, type);
+}
+
 // It can handle the statements like case, conditional(if), for loop, and etc.
 LogicalResult
 Context::convertStatement(const slang::ast::Statement *statement) {
@@ -79,8 +128,9 @@ Context::convertStatement(const slang::ast::Statement *statement) {
     return mlir::emitError(loc, "unsupported statement: break");
   case slang::ast::StatementKind::Continue:
     return mlir::emitError(loc, "unsupported statement: continue");
-  case slang::ast::StatementKind::Case:
-    return mlir::emitError(loc, "unsupported statement: case");
+  case slang::ast::StatementKind::Case: {
+    return visitCaseStmt(&statement->as<slang::ast::CaseStatement>());
+  }
   case slang::ast::StatementKind::PatternCase:
     return mlir::emitError(loc, "unsupported statement: pattern case");
   case slang::ast::StatementKind::ForLoop:

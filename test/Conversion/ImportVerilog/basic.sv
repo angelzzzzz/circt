@@ -276,5 +276,15 @@ module Statements();
     // CHECK: scf.if [[COND]]
     if (a)
       ;
+
+    // CHECK: [[TMP1:%.+]] = moore.mir.eq %a, %b : (!moore.int) -> i1
+    // CHECK: scf.if [[TMP1]] {
+    // CHECK: } else {
+    // CHECK: }
+    case (a)
+      b: ;
+      default ;
+    endcase
+    
   end
 endmodule
