@@ -188,13 +188,14 @@ def EventControlOp : MooreOp<"event", [
 
 def ConstantOp : MooreOp<"constant", [Pure]> {
   let summary = "A constant integer value";
-  let arguments = (ins APIntAttr:$value);
+  let arguments = (ins APIntAttr:$value,OptionalAttr<StrAttr>:$name);
   let results = (outs SimpleBitVectorType:$result);
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
   let builders = [
     OpBuilder<(ins "Type":$type, "const APInt &":$value)>,
     OpBuilder<(ins "Type":$type, "int64_t":$value)>,
+    OpBuilder<(ins "Type":$type, "int64_t":$value, "StringRef":$name)>,
   ];
 }
 

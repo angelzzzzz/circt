@@ -59,7 +59,10 @@ void NetOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
 void ConstantOp::print(OpAsmPrinter &p) {
   p << " ";
   p.printAttributeWithoutType(getValueAttr());
-  p.printOptionalAttrDict((*this)->getAttrs(), /*elidedAttrs=*/{"value"});
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          /*elidedAttrs=*/{"value", "name"});
+  if (auto name = getOperation()->getAttr("name"))
+    p << " " << name;
   p << " : ";
   p.printType(getType());
 }
@@ -101,7 +104,7 @@ void ConstantOp::build(OpBuilder &builder, OperationState &result, Type type,
   assert(sbvt.size == value.getBitWidth() &&
          "APInt width must match simple bit vector's bit width");
   build(builder, result, type,
-        builder.getIntegerAttr(builder.getIntegerType(sbvt.size), value));
+        builder.getIntegerAttr(builder.getIntegerType(sbvt.size), value), {});
 }
 
 /// This builder allows construction of small signed integers like 0, 1, -1
@@ -113,6 +116,16 @@ void ConstantOp::build(OpBuilder &builder, OperationState &result, Type type,
   auto sbvt = type.cast<UnpackedType>().getSimpleBitVector();
   build(builder, result, type,
         APInt(sbvt.size, (uint64_t)value, /*isSigned=*/true));
+}
+
+void ConstantOp::build(OpBuilder &builder, OperationState &result, Type type,
+                       int64_t value, StringRef name) {
+  auto sbvt = type.cast<UnpackedType>().getSimpleBitVector();
+  auto nameAttr = builder.getStringAttr(name);
+  build(builder, result, type,
+        APInt(sbvt.size, (uint64_t)value, /*isSigned=*/true));
+  if (!name.empty())
+    result.addAttribute("name", nameAttr);
 }
 
 //===----------------------------------------------------------------------===//

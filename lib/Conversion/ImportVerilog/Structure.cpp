@@ -141,9 +141,15 @@ Context::convertModuleBody(const slang::ast::InstanceBodySymbol *module) {
                << "- Handling " << slang::ast::toString(member.kind) << "\n");
     auto loc = convertLocation(member.location);
 
-    // Skip parameters. The AST is already monomorphized.
-    if (member.kind == slang::ast::SymbolKind::Parameter)
+    if (auto *paramAst = member.as_if<slang::ast::ParameterSymbol>()) {
+      auto value = *paramAst->getInitializer()->constant->integer().getRawPtr();
+      builder.create<moore::ConstantOp>(
+          convertLocation(paramAst->location),
+          convertType(*paramAst->getDeclaredType()),
+          builder.getI32IntegerAttr(value),
+          builder.getStringAttr(paramAst->name));
       continue;
+    }
 
     // Skip type-related declarations. These are absorbedby the types.
     if (member.kind == slang::ast::SymbolKind::TypeAlias ||

@@ -288,3 +288,12 @@ module Statements();
     
   end
 endmodule
+
+
+// CHECK-LABEL: moore.module @Generates {
+module Generates();
+  // CHECK: %0 = moore.constant 2 "a" : !moore.packed<range<logic<signed>, 31:0>>
+  // CHECK: %1 = moore.constant 3 "b" : !moore.packed<range<logic<signed>, 31:0>>
+  parameter a = 2;
+  localparam b = 3;
+endmodule
