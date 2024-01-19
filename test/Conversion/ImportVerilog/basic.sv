@@ -296,4 +296,38 @@ module Generates();
   // CHECK: %1 = moore.constant 3 "b" : !moore.packed<range<logic<signed>, 31:0>>
   parameter a = 2;
   localparam b = 3;
+  genvar i;
+
+  generate
+    // CHECK: [[TMP1:%.+]] = moore.constant 0 "i" : !moore.integer
+    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.integer -> !moore.int
+    // CHECK: %c = moore.variable [[TMP2]] : !moore.int
+    // CHECK: [[TMP3:%.+]] = moore.constant 1 "i" : !moore.integer
+    // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.integer -> !moore.int
+    // CHECK: %c_0 = moore.variable name "c" [[TMP4]] : !moore.int
+    for(i=0;i<a;i=i+1)begin
+	    int c = i;
+	  end
+
+    // CHECK: [[TMP1:%.+]] = moore.constant 2 : !moore.int
+    // CHECK: %d = moore.variable [[TMP1]] : !moore.int
+	  if(a == 2)begin
+      int d = 2;
+	  end
+  	else begin
+      int d = 3;
+	  end
+
+    // CHECK: [[TMP1:%.+]] = moore.constant 2 : !moore.int
+    // CHECK: %e = moore.variable [[TMP1]] : !moore.int
+	  case (a)
+      2:begin
+        int e = 2;
+      end
+      default:begin
+        int e = 3;
+      end
+    endcase
+    
+  endgenerate
 endmodule

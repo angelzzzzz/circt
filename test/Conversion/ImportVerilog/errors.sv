@@ -16,5 +16,5 @@ endmodule
 
 module Foo;
   // expected-warning @below {{unsupported construct ignored}}
-  genvar a;
+  specparam sp =8;
 endmodule
