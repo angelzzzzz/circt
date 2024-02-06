@@ -188,15 +188,40 @@ def EventControlOp : MooreOp<"event", [
 
 def ConstantOp : MooreOp<"constant", [Pure]> {
   let summary = "A constant integer value";
-  let arguments = (ins APIntAttr:$value,OptionalAttr<StrAttr>:$name);
+  let arguments = (ins APIntAttr:$value);
   let results = (outs SimpleBitVectorType:$result);
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
   let builders = [
     OpBuilder<(ins "Type":$type, "const APInt &":$value)>,
     OpBuilder<(ins "Type":$type, "int64_t":$value)>,
-    OpBuilder<(ins "Type":$type, "int64_t":$value, "StringRef":$name)>,
   ];
+}
+
+def Parameter : I32EnumAttrCase<"Parameter", 0, "parameter">;
+def LocalParameter : I32EnumAttrCase<"LocalParameter", 1, "localparam">;
+def SpecParameter : I32EnumAttrCase<"SpecParameter", 2, "specparam">;
+
+def NamedConstAttr : I32EnumAttr<"NamedConst", "elaboration-time constants", 
+       [Parameter, LocalParameter, SpecParameter]>{
+    let cppNamespace = "circt::moore";
+}
+
+def NamedConstantOp : MooreOp<"named_constant", [
+  DeclareOpInterfaceMethods<OpAsmOpInterface, ["getAsmResultNames"]>,
+]>{
+  let summary = "An elaboration time constant expression";
+  let description = [{
+    See IEEE 1800-2017 § 6.20 "Constants".
+  }];
+  let arguments = (ins StrAttr:$name, 
+                       NamedConstAttr:$kind, 
+                       I64Attr:$value);
+  let results = (outs UnpackedType:$result);
+  let assemblyFormat = [{
+    `` custom<ImplicitSSAName>($name) $kind $value attr-dict
+    `:` type($result)
+  }];
 }
 
 def ConversionOp : MooreOp<"conversion", [Pure]> {
@@ -223,7 +248,7 @@ def ConversionOp : MooreOp<"conversion", [Pure]> {
     See IEEE 1800-2017 § 6.24 "Casting".
   }];
   let arguments = (ins AnyType:$input);
-  let results = (outs UnpackedType:$result);
+  let results = (outs AnyType:$result);
   let assemblyFormat = [{
     $input attr-dict `:` type($input) `->` type($result)
   }];
@@ -564,5 +589,27 @@ def LtOp : RelationalOpBase<"lt"> { let summary = "Less than"; }
 def LeOp : RelationalOpBase<"le"> { let summary = "Less than or equal"; }
 def GtOp : RelationalOpBase<"gt"> { let summary = "Greater than"; }
 def GeOp : RelationalOpBase<"ge"> { let summary = "Greater than or equal"; }
+
+class LogicalOpBase<string mnemonic, string operatorName> : 
+                      MooreOp<mnemonic, [Pure]>{
+  let summary = !subst("$op", operatorName, "Logical $op operator");
+  let description = !subst("$op", operatorName, [{
+    The result of the evaluation of a logical operation shall be `1`, `0`, 
+    or, if the result is ambiguous, the unkonw value `x`.
+
+    See IEEE 1800-2017 § 11.4.7 "Logical operators".
+  }]);
+  let arguments = (ins SimpleBitVectorType:$lhs, SimpleBitVectorType:$rhs);
+  let results = (outs SingleBitType:$result);
+  let assemblyFormat = [{
+    $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($result)
+  }];
+  // TODO: Add a type constraint to lhs and rhs.
+}
+
+def LogicalAndOp : LogicalOpBase<"logical_and", "and">;
+def LogicalOrOp : LogicalOpBase<"logical_or", "or">;
+def LogicalImplOp : LogicalOpBase<"logical_impl", "implication">;
+def LogicalEquivOp : LogicalOpBase<"logical_equiv", "equivalence">;
 
 #endif // CIRCT_DIALECT_MOORE_MOOREOPS

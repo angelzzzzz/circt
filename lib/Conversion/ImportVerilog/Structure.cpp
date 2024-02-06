@@ -140,7 +140,6 @@ Context::convertModuleBody(const slang::ast::InstanceBodySymbol *module) {
     if (failed(walkMember(member)))
       return failure();
   }
-
   return success();
 }
 
@@ -148,10 +147,6 @@ LogicalResult Context::walkMember(const slang::ast::Symbol &member) {
   LLVM_DEBUG(llvm::dbgs() << "- Handling " << slang::ast::toString(member.kind)
                           << "\n");
   auto loc = convertLocation(member.location);
-
-  // Skip genvar.
-  if (member.kind == slang::ast::SymbolKind::Genvar)
-    return success();
 
   // Skip type-related declarations. These are absorbedby the types.
   if (member.kind == slang::ast::SymbolKind::TypeAlias ||
@@ -161,6 +156,10 @@ LogicalResult Context::walkMember(const slang::ast::Symbol &member) {
 
   // Skip semicolons.
   if (member.kind == slang::ast::SymbolKind::EmptyMember)
+    return success();
+
+  // Skip genvar.
+  if (member.kind == slang::ast::SymbolKind::Genvar)
     return success();
 
   // Handle instances.
@@ -188,6 +187,7 @@ LogicalResult Context::walkMember(const slang::ast::Symbol &member) {
         convertLocation(varAst->location), loweredType,
         builder.getStringAttr(varAst->name), initial);
     varSymbolTable.insert(varAst->name, varOp);
+    createPostValue(loc);
     return success();
   }
 
@@ -242,14 +242,36 @@ LogicalResult Context::walkMember(const slang::ast::Symbol &member) {
 
   // Handle Parameters
   if (auto *paramAst = member.as_if<slang::ast::ParameterSymbol>()) {
-    // auto value =
-    // *paramAst->getInitializer()->constant->integer().getRawPtr();
+    auto type = convertType(*paramAst->getDeclaredType());
+    if (!type)
+      return failure();
     auto value = *paramAst->getValue().integer().getRawPtr();
-    auto constOp = builder.create<moore::ConstantOp>(
-        convertLocation(paramAst->location),
-        convertType(*paramAst->getDeclaredType()), int64_t(value),
-        builder.getStringAttr(paramAst->name));
-    varSymbolTable.insert(paramAst->name, constOp);
+    auto namedConstantOp = builder.create<moore::NamedConstantOp>(
+        convertLocation(paramAst->location), type,
+        builder.getStringAttr(paramAst->name),
+        paramAst->isLocalParam()
+            ? moore::NamedConstAttr::get(getContext(),
+                                         moore::NamedConst::LocalParameter)
+            : moore::NamedConstAttr::get(getContext(),
+                                         moore::NamedConst::Parameter),
+        builder.getI64IntegerAttr(value));
+    varSymbolTable.insert(paramAst->name, namedConstantOp);
+    return success();
+  }
+
+  // Handle Specparam
+  if (auto *spAst = member.as_if<slang::ast::SpecparamSymbol>()) {
+    auto type = convertType(*spAst->getDeclaredType());
+    if (!type)
+      return failure();
+    auto value = *spAst->getValue().integer().getRawPtr();
+    auto namedConstantOp = builder.create<moore::NamedConstantOp>(
+        convertLocation(spAst->location), type,
+        builder.getStringAttr(spAst->name),
+        moore::NamedConstAttr::get(getContext(),
+                                   moore::NamedConst::SpecParameter),
+        builder.getI64IntegerAttr(value));
+    varSymbolTable.insert(spAst->name, namedConstantOp);
     return success();
   }
 

@@ -24,6 +24,7 @@ struct ExprVisitor {
   Context &context;
   Location loc;
   OpBuilder &builder;
+  std::queue<std::tuple<Value, bool>> &postValueList;
 
   /// Helper function to convert a value to its simple bit vector
   /// representation, if it has one. Otherwise returns null.
@@ -107,10 +108,11 @@ struct ExprVisitor {
     auto preValue = convertToSimpleBitVector(arg);
     if (!preValue)
       return {};
-    auto sbvt =
-        cast<moore::UnpackedType>(preValue.getType()).getSimpleBitVector();
-    auto one = builder.create<moore::ConstantOp>(loc, preValue.getType(),
-                                                 APInt(sbvt.size, 1));
+    if (isPost) {
+      postValueList.emplace(preValue, isInc);
+      return preValue;
+    }
+    auto one = builder.create<moore::ConstantOp>(loc, preValue.getType(), 1);
     auto postValue =
         isInc ? builder.create<moore::AddOp>(loc, preValue, one).getResult()
               : builder.create<moore::SubOp>(loc, preValue, one).getResult();
@@ -119,7 +121,7 @@ struct ExprVisitor {
                                                    "preValue", arg);
     }
     builder.create<moore::BPAssignOp>(loc, arg, postValue);
-    return isPost ? preValue : postValue;
+    return postValue;
   }
 
   Value visit(const slang::ast::UnaryExpression &expr) {
@@ -189,6 +191,7 @@ struct ExprVisitor {
   }
 
   Value visit(const slang::ast::BinaryExpression &expr) {
+    auto type = context.convertType(*expr.type);
     auto lhs = context.convertExpression(expr.left());
     auto rhs = context.convertExpression(expr.right());
     if (!lhs || !rhs)
@@ -243,17 +246,13 @@ struct ExprVisitor {
       return createBinary<moore::LtOp>(lhs, rhs);
 
     case BinaryOperator::LogicalAnd:
-      return builder.create<moore::LogicalOp>(loc, moore::Logic::LogicalAnd,
-                                              lhs, rhs);
+      return builder.create<moore::LogicalAndOp>(loc, type, lhs, rhs);
     case BinaryOperator::LogicalOr:
-      return builder.create<moore::LogicalOp>(loc, moore::Logic::LogicalOr, lhs,
-                                              rhs);
+      return builder.create<moore::LogicalOrOp>(loc, type, lhs, rhs);
     case BinaryOperator::LogicalImplication:
-      return builder.create<moore::LogicalOp>(
-          loc, moore::Logic::LogicalImplication, lhs, rhs);
+      return builder.create<moore::LogicalImplOp>(loc, type, lhs, rhs);
     case BinaryOperator::LogicalEquivalence:
-      return builder.create<moore::LogicalOp>(
-          loc, moore::Logic::LogicalEquivalence, lhs, rhs);
+      return builder.create<moore::LogicalEquivOp>(loc, type, lhs, rhs);
     case BinaryOperator::LogicalShiftLeft:
       return builder.create<moore::ShlOp>(loc, lhs, rhs);
     case BinaryOperator::LogicalShiftRight:
@@ -272,15 +271,15 @@ struct ExprVisitor {
   }
 
   Value visit(const slang::ast::ConditionalExpression &expr) {
-    auto type = context.convertType(*expr.conditions.begin()->expr->type);
     Value cond = convertToSimpleBitVector(
         context.convertExpression(*expr.conditions.begin()->expr));
     if (!cond)
       return {};
-    if (!cond.getType().isa<mlir::IntegerType>()) {
-      auto zeroValue = builder.create<moore::ConstantOp>(loc, type, 0);
-      cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
+    if (auto condType = dyn_cast_or_null<moore::UnpackedType>(cond.getType())) {
+      if (condType.isCastableToSimpleBitVector() && condType.getBitSize() != 1)
+        cond = builder.create<moore::BoolCastOp>(loc, cond);
     }
+    cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
     auto ifOp = builder.create<mlir::scf::IfOp>(
         loc, cond,
         [&](OpBuilder &builder, Location loc) {
@@ -294,40 +293,21 @@ struct ExprVisitor {
     return ifOp.getResult(0);
   }
 
-  Value
-  createInside(nonstd::span<const slang::ast::Expression *const> &rangeList,
-               unsigned long startIndex, Value lhs, Location loc, Type type) {
-    if (startIndex >= rangeList.size()) {
-      auto falseValue = builder.create<moore::ConstantOp>(loc, type, 0);
-      return falseValue;
-    }
-    auto member = convertToSimpleBitVector(
-        context.convertExpression(*rangeList[startIndex]));
-    Value cond = builder.create<moore::EqualityOp>(loc, lhs, member);
-    if (!cond.getType().isa<mlir::IntegerType>()) {
-      auto zeroValue = builder.create<moore::ConstantOp>(loc, type, 0);
-      cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
-    }
-    auto ifOp = builder.create<mlir::scf::IfOp>(
-        loc, cond,
-        [&](OpBuilder &builder, Location loc) {
-          Value trueValue = builder.create<moore::ConstantOp>(loc, type, 1);
-          builder.create<mlir::scf::YieldOp>(loc, trueValue);
-        },
-        [&](OpBuilder &builder, Location loc) {
-          auto result = createInside(rangeList, startIndex + 1, lhs, loc, type);
-          builder.create<mlir::scf::YieldOp>(loc, result);
-        });
-    return ifOp.getResult(0);
-  }
-
   Value visit(const slang::ast::InsideExpression &expr) {
     auto lhs = convertToSimpleBitVector(context.convertExpression(expr.left()));
     auto rangeList = expr.rangeList();
-    if (!lhs || rangeList.empty())
-      return {};
-    auto type = context.convertType(*expr.type);
-    return createInside(rangeList, 0, lhs, loc, type);
+    auto rhs =
+        convertToSimpleBitVector(context.convertExpression(*rangeList.front()));
+    Value preValue = builder.create<moore::EqOp>(loc, lhs, rhs);
+
+    for (unsigned long i = 1; i < rangeList.size(); i++) {
+      rhs = convertToSimpleBitVector(context.convertExpression(*rangeList[i]));
+      auto newEqOp = builder.create<moore::EqOp>(loc, lhs, rhs);
+      preValue = builder.create<moore::LogicalOrOp>(loc, newEqOp.getType(),
+                                                    preValue, newEqOp);
+      // TODO: Is it more efficient to use IfOp and YieldOp than LogicalOr?
+    }
+    return preValue;
   }
 
   Value visit(const slang::ast::IntegerLiteral &expr) {
@@ -365,5 +345,5 @@ struct ExprVisitor {
 
 Value Context::convertExpression(const slang::ast::Expression &expr) {
   auto loc = convertLocation(expr.sourceRange.start());
-  return expr.visit(ExprVisitor{*this, loc, builder});
+  return expr.visit(ExprVisitor{*this, loc, builder, postValueList});
 }

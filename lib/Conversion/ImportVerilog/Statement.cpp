@@ -22,7 +22,6 @@ using namespace ImportVerilog;
 LogicalResult Context::visitConditionalStmt(
     const slang::ast::ConditionalStatement *conditionalStmt) {
   auto loc = convertLocation(conditionalStmt->sourceRange.start());
-  auto type = conditionalStmt->conditions.begin()->expr->type;
 
   Value cond = convertExpression(*conditionalStmt->conditions.begin()->expr);
   if (!cond)
@@ -31,11 +30,11 @@ LogicalResult Context::visitConditionalStmt(
   // The numeric value of the if expression is tested for being zero.
   // And if (expression) is equivalent to if (expression != 0).
   // So the following code is for handling `if (expression)`.
-  if (!cond.getType().isa<mlir::IntegerType>()) {
-    auto zeroValue =
-        builder.create<moore::ConstantOp>(loc, convertType(*type), 0);
-    cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
+  if (auto condType = dyn_cast_or_null<moore::UnpackedType>(cond.getType())) {
+    if (condType.isCastableToSimpleBitVector())
+      cond = builder.create<moore::BoolCastOp>(loc, cond);
   }
+  cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
 
   auto ifOp = builder.create<mlir::scf::IfOp>(
       loc, cond, conditionalStmt->ifFalse != nullptr);
@@ -54,53 +53,83 @@ LogicalResult Context::visitConditionalStmt(
   return success();
 }
 
-LogicalResult Context::createCase(
-    Value caseExpr,
-    nonstd::span<slang::ast::CaseStatement::ItemGroup const> &items,
-    const slang::ast::Statement *defaultCase, unsigned long itemIndex,
-    unsigned long exprIndex, Location loc, Type type) {
-  if (itemIndex >= items.size()) {
-    return convertStatement(defaultCase);
-  }
-  auto itemExpr = convertExpression(*items[itemIndex].expressions[exprIndex]);
-  auto itemStmt = items[itemIndex].stmt;
-  Value cond = builder.create<moore::EqualityOp>(loc, caseExpr, itemExpr);
-  if (!cond.getType().isa<mlir::IntegerType>()) {
-    auto zeroValue = builder.create<moore::ConstantOp>(loc, type, 0);
-    cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
-  }
+LogicalResult
+Context::visitCaseStmt(const slang::ast::CaseStatement *caseStmt) {
+  auto loc = convertLocation(caseStmt->sourceRange.start());
+  auto caseExpr = convertExpression(caseStmt->expr);
+  auto items = caseStmt->items;
+  const auto *defaultCase = caseStmt->defaultCase;
 
-  auto ifOp = builder.create<mlir::scf::IfOp>(
-      loc, cond, itemIndex < (items.size() - 1) || defaultCase != nullptr);
-  OpBuilder::InsertionGuard guard(builder);
-
-  builder.setInsertionPoint(ifOp.thenYield());
-  if (failed(convertStatement(itemStmt)))
-    return failure();
-
-  if (itemIndex < (items.size() - 1) || defaultCase != nullptr) {
-    builder.setInsertionPoint(ifOp.elseYield());
-    if (exprIndex < (items[itemIndex].expressions.size() - 1)) {
-      return createCase(caseExpr, items, defaultCase, itemIndex, exprIndex + 1,
-                        loc, type);
+  if (defaultCase != nullptr) {
+    auto itemExpr = convertExpression(*items.front().expressions.front());
+    Value preValue = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+    auto cond =
+        builder.create<moore::ConversionOp>(loc, builder.getI1Type(), preValue);
+    auto newIfOp = builder.create<mlir::scf::IfOp>(loc, cond);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPoint(newIfOp.thenYield());
+      if (failed(convertStatement(items.front().stmt)))
+        return failure();
     }
 
-    return createCase(caseExpr, items, defaultCase, itemIndex + 1, 0, loc,
-                      type);
+    for (unsigned long i = 0; i < items.size(); i++) {
+      auto itemStmt = items[i].stmt;
+      for (unsigned long j = 0; j < items[i].expressions.size(); j++) {
+        if (i == 0 && j == 0)
+          continue;
+        itemExpr = convertExpression(*items[i].expressions[j]);
+        auto newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+        preValue = builder.create<moore::LogicalOrOp>(loc, newEqOp.getType(),
+                                                      preValue, newEqOp);
+        auto cond = builder.create<moore::ConversionOp>(
+            loc, builder.getI1Type(), newEqOp);
+        auto newIfOp = builder.create<mlir::scf::IfOp>(loc, cond);
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPoint(newIfOp.thenYield());
+        if (failed(convertStatement(itemStmt)))
+          return failure();
+      }
+    }
+
+    auto notPreValue = builder.create<moore::NotOp>(loc, preValue);
+    cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(),
+                                               notPreValue);
+    auto ifOp = builder.create<mlir::scf::IfOp>(loc, cond);
+    builder.setInsertionPoint(ifOp.thenYield());
+    if (failed(convertStatement(defaultCase)))
+      return failure();
+  } else {
+    for (auto item : items) {
+      auto itemStmt = item.stmt;
+      for (const auto *expr : item.expressions) {
+        auto itemExpr = convertExpression(*expr);
+        auto newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+        auto cond = builder.create<moore::ConversionOp>(
+            loc, builder.getI1Type(), newEqOp);
+        auto ifOp = builder.create<mlir::scf::IfOp>(loc, cond);
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPoint(ifOp.thenYield());
+        if (failed(convertStatement(itemStmt)))
+          return failure();
+      }
+    }
   }
   return success();
 }
 
-LogicalResult
-Context::visitCaseStmt(const slang::ast::CaseStatement *caseStmt) {
-  auto loc = convertLocation(caseStmt->sourceRange.start());
-  auto type = convertType(*caseStmt->expr.type);
-  auto caseExpr = convertExpression(caseStmt->expr);
-  auto items = caseStmt->items;
-  const auto *defaultCase = caseStmt->defaultCase;
-  if (!caseExpr || items.empty())
-    return failure();
-  return createCase(caseExpr, items, defaultCase, 0, 0, loc, type);
+void Context::createPostValue(Location loc) {
+  while (!postValueList.empty()) {
+    auto value = postValueList.front();
+    auto preValue = std::get<0>(value);
+    auto one = builder.create<moore::ConstantOp>(loc, preValue.getType(), 1);
+    auto postValue =
+        std::get<1>(value)
+            ? builder.create<moore::AddOp>(loc, preValue, one).getResult()
+            : builder.create<moore::SubOp>(loc, preValue, one).getResult();
+    builder.create<moore::BPAssignOp>(loc, preValue, postValue);
+    postValueList.pop();
+  }
 }
 
 // It can handle the statements like case, conditional(if), for loop, and etc.
@@ -117,9 +146,12 @@ Context::convertStatement(const slang::ast::Statement *statement) {
     break;
   case slang::ast::StatementKind::Block:
     return convertStatement(&statement->as<slang::ast::BlockStatement>().body);
-  case slang::ast::StatementKind::ExpressionStatement:
-    return success(convertExpression(
-        statement->as<slang::ast::ExpressionStatement>().expr));
+  case slang::ast::StatementKind::ExpressionStatement: {
+    auto value = convertExpression(
+        statement->as<slang::ast::ExpressionStatement>().expr);
+    createPostValue(loc);
+    return success(value);
+  }
   case slang::ast::StatementKind::VariableDeclaration:
     return mlir::emitError(loc, "unsupported statement: variable declaration");
   case slang::ast::StatementKind::Return:

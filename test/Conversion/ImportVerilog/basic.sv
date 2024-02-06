@@ -79,27 +79,25 @@ module Expressions();
     // CHECK: moore.not [[TMP]] : !moore.bit
     x = !a;
 
+    // CHECK: moore.mir.bpassign %c, %a : !moore.int
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int
-    // CHECK: [[PREVALUE:%.+]] = moore.variable %a : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, [[PREVALUE]]
+    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
     c = a++;
+    // CHECK: moore.mir.bpassign %c, %a : !moore.int
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.sub %a, [[TMP1]] : !moore.int
-    // CHECK: [[PREVALUE:%.+]] = moore.variable name "preValue" %a : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, [[PREVALUE]]
+    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
     c = a--;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, [[TMP2]]
+    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
+    // CHECK: moore.mir.bpassign %c, [[TMP2]] : !moore.int
     c = ++a;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.sub %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, [[TMP2]]
+    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
+    // CHECK: moore.mir.bpassign %c, [[TMP2]] : !moore.int
     c = --a;
 
     // Binary operators
@@ -165,13 +163,13 @@ module Expressions();
     // CHECK: moore.lt %a, %b : !moore.int -> !moore.bit
     c = a < b;
 
-    // CHECK: moore.mir.logic and %a, %b : !moore.int, !moore.int
+    // CHECK: moore.logical_and %a, %b : !moore.int, !moore.int -> !moore.bit
     c = a && b;
-    // CHECK: moore.mir.logic equiv %a, %b : !moore.int, !moore.int
+    // CHECK: moore.logical_equiv %a, %b : !moore.int, !moore.int -> !moore.bit
     c = a <-> b;
-    // CHECK: moore.mir.logic impl %a, %b : !moore.int, !moore.int
+    // CHECK: moore.logical_impl %a, %b : !moore.int, !moore.int -> !moore.bit
     c = a -> b;
-    // CHECK: moore.mir.logic or %a, %b : !moore.int, !moore.int
+    // CHECK: moore.logical_or %a, %b : !moore.int, !moore.int -> !moore.bit
     c = a || b;
 
     // CHECK: moore.mir.shl %a, %b : !moore.int, !moore.int
@@ -184,35 +182,41 @@ module Expressions();
     c = a >>> b;
 
     // CHECK: [[TMP1:%.+]] = moore.gt %a, %b : !moore.int -> !moore.bit
-    // CHECK: [[TMP2:%.+]] = moore.constant false : !moore.bit
-    // CHECK: [[TMP3:%.+]] = moore.mir.ne [[TMP1]], [[TMP2]] : (!moore.bit) -> i1
-    // CHECK: [[TMP4:%.+]] = scf.if [[TMP3]] -> (!moore.int) {
+    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.bit -> i1
+    // CHECK: [[TMP3:%.+]] = scf.if [[TMP2]] -> (!moore.int) {
     // CHECK:   scf.yield %a : !moore.int
     // CHECK: } else {
     // CHECK:   scf.yield %b : !moore.int
     // CHECK: }
-    // CHECK: moore.mir.bpassign %c, [[TMP4]] : !moore.int
+    // CHECK: moore.mir.bpassign %c, [[TMP3]] : !moore.int
     c = a > b ? a : b;
 
-    // CHECK: [[TMP1:%.+]] = moore.mir.eq %a, %a : (!moore.int) -> i1
-    // CHECK: [[TMP2:%.+]] = scf.if [[TMP1]] -> (!moore.logic) {
-    // CHECK:   [[TMP5:%.+]] = moore.constant true : !moore.logic
-    // CHECK:   scf.yield [[TMP5]] : !moore.logic
-    // CHECK: } else {
-    // CHECK:   [[TMP5:%.+]] = moore.mir.eq %a, %b : (!moore.int) -> i1
-    // CHECK:   [[TMP6:%.+]] = scf.if [[TMP5]] -> (!moore.logic) {
-    // CHECK:     [[TMP7:%.+]] = moore.constant true : !moore.logic
-    // CHECK:     scf.yield [[TMP7]] : !moore.logic
-    // CHECK:   } else {
-    // CHECK:     [[TMP7:%.+]] = moore.constant false : !moore.logic
-    // CHECK:     scf.yield [[TMP7]] : !moore.logic
-    // CHECK:   }
-    // CHECK:   scf.yield [[TMP6]] : !moore.logic
-    // CHECK: }
-    // CHECK: [[TMP3:%.+]] = moore.conversion [[TMP2]] : !moore.logic -> !moore.packed<range<logic, 31:0>>
-    // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.packed<range<logic, 31:0>> -> !moore.int
-    // CHECK: moore.mir.bpassign %c, [[TMP4]] : !moore.int
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
+    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.bit -> !moore.packed<range<logic, 31:0>>
+    // CHECK: [[TMP3:%.+]] = moore.conversion [[TMP2]] : !moore.packed<range<logic, 31:0>> -> !moore.int
+    // CHECK: moore.mir.bpassign %c, [[TMP3]] : !moore.int
+    c = a inside {a};
+
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
+    // CHECK: [[TMP2:%.+]] = moore.eq %a, %b : !moore.int -> !moore.bit
+    // CHECK: [[TMP3:%.+]] = moore.logical_or [[TMP1]], [[TMP2]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.bit -> !moore.packed<range<logic, 31:0>>
+    // CHECK: [[TMP5:%.+]] = moore.conversion [[TMP4]] : !moore.packed<range<logic, 31:0>> -> !moore.int
+    // CHECK: moore.mir.bpassign %c, [[TMP5]] : !moore.int
     c = a inside {a, b};
+
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
+    // CHECK: [[TMP2:%.+]] = moore.eq %a, %b : !moore.int -> !moore.bit
+    // CHECK: [[TMP3:%.+]] = moore.logical_or [[TMP1]], [[TMP2]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP4:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
+    // CHECK: [[TMP5:%.+]] = moore.logical_or [[TMP3]], [[TMP4]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP6:%.+]] = moore.eq %a, %b : !moore.int -> !moore.bit
+    // CHECK: [[TMP7:%.+]] = moore.logical_or [[TMP5]], [[TMP6]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP8:%.+]] = moore.conversion [[TMP7]] : !moore.bit -> !moore.packed<range<logic, 31:0>>
+    // CHECK: [[TMP9:%.+]] = moore.conversion [[TMP8]] : !moore.packed<range<logic, 31:0>> -> !moore.int
+    // CHECK: moore.mir.bpassign %c, [[TMP9]] : !moore.int
+    c = a inside {a, b, a, b};
+
   end
 endmodule
 
@@ -271,15 +275,20 @@ module Statements();
   int a, b;
 
   initial begin
-    // CHECK: [[ZERO:%.+]] = moore.constant 0 : !moore.int
-    // CHECK: [[COND:%.+]] = moore.mir.ne %a, [[ZERO]] : (!moore.int) -> i1
-    // CHECK: scf.if [[COND]]
+
+    // CHECK: [[TMP1:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.bit -> i1
+    // CHECK: scf.if [[TMP2:%.+]]
     if (a)
       ;
 
-    // CHECK: [[TMP1:%.+]] = moore.mir.eq %a, %b : (!moore.int) -> i1
-    // CHECK: scf.if [[TMP1]] {
-    // CHECK: } else {
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %b : !moore.int -> !moore.bit
+    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.bit -> i1
+    // CHECK: scf.if [[TMP2]] {
+    // CHECK: }
+    // CHECK: [[TMP3:%.+]] = moore.not [[TMP1]] : !moore.bit
+    // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.bit -> i1
+    // CHECK: scf.if [[TMP4]] {
     // CHECK: }
     case (a)
       b: ;
@@ -292,19 +301,21 @@ endmodule
 
 // CHECK-LABEL: moore.module @Generates {
 module Generates();
-  // CHECK: %0 = moore.constant 2 "a" : !moore.packed<range<logic<signed>, 31:0>>
-  // CHECK: %1 = moore.constant 3 "b" : !moore.packed<range<logic<signed>, 31:0>>
+  // CHECK: %a = moore.named_constant parameter 2 : !moore.packed<range<logic<signed>, 31:0>>
+  // CHECK: %b = moore.named_constant localparam 3 : !moore.packed<range<logic<signed>, 31:0>>
+  // CHECK：%sp = moore.named_constant specparam 4 : !moore.packed<range<logic<signed>, 31:0>>
   parameter a = 2;
   localparam b = 3;
+  specparam sp = 4;
   genvar i;
 
   generate
-    // CHECK: [[TMP1:%.+]] = moore.constant 0 "i" : !moore.integer
-    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.integer -> !moore.int
-    // CHECK: %c = moore.variable [[TMP2]] : !moore.int
-    // CHECK: [[TMP3:%.+]] = moore.constant 1 "i" : !moore.integer
-    // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.integer -> !moore.int
-    // CHECK: %c_0 = moore.variable name "c" [[TMP4]] : !moore.int
+    // CHECK: %i = moore.named_constant localparam 0 : !moore.integer
+    // CHECK: [[TMP1:%.+]] = moore.conversion %i : !moore.integer -> !moore.int
+    // CHECK: %c = moore.variable [[TMP1]] : !moore.int
+    // CHECK: %i_0 = moore.named_constant name "i" localparam 1 : !moore.integer
+    // CHECK: [[TMP2:%.+]] = moore.conversion %i_0 : !moore.integer -> !moore.int
+    // CHECK: %c_1 = moore.variable name "c" [[TMP2]] : !moore.int
     for(i=0;i<a;i=i+1)begin
 	    int c = i;
 	  end

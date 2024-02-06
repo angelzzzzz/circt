@@ -71,6 +71,8 @@ struct Context {
              unsigned long exprIndex, Location loc, Type type);
   LogicalResult visitCaseStmt(const slang::ast::CaseStatement *caseStmt);
 
+  void createPostValue(Location loc);
+
   // Convert a slang expression into an MLIR expression.
   Value convertExpression(const slang::ast::Expression &expr);
 
@@ -114,6 +116,8 @@ struct Context {
   /// A list of modules for which the header has been created, but the body has
   /// not been converted yet.
   std::queue<const slang::ast::InstanceBodySymbol *> moduleWorklist;
+  /// A list of value needs increment or decrement.
+  std::queue<std::tuple<Value, bool>> postValueList;
 };
 
 /// Convert a slang `SourceLocation` to an MLIR `Location`.
