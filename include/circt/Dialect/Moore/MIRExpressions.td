@@ -24,59 +24,6 @@ class BinOp<string mnemonic, list<Trait> traits = []> :
     "$lhs `,` $rhs (`bin` $twoState^)? attr-dict `:` functional-type($args, $results)";
 }
 
-// Binary operator with uniform input types.
-class UTBinOp<string mnemonic, list<Trait> traits = []> :
-      BinOp<mnemonic,
-               traits # [SameTypeOperands, SameOperandsAndResultType]> {
-  let assemblyFormat = "(`bin` $twoState^)? $lhs `,` $rhs attr-dict `:` qualified(type($result))";
-}
-
-// Base class for   variadic operators.
-class VariadicOp<string mnemonic, list<Trait> traits = []> :
-      MIROp<mnemonic, traits> {
-  let arguments = (ins Variadic<AnyType>:$inputs, UnitAttr:$twoState);
-  
-  let results = (outs AnyType:$result);
-}
-
-// VariadicOp with uniform input types.
-class UTVariadicOp<string mnemonic, list<Trait> traits = []> :
-      VariadicOp<mnemonic,
-                    traits # [SameTypeOperands, SameOperandsAndResultType]> {
-
-  let assemblyFormat = "(`bin` $twoState^)? $inputs attr-dict `:` qualified(type($result))";
-
-  let builders = [
-    OpBuilder<(ins "Value":$lhs, "Value":$rhs, CArg<"bool", "false">:$twoState), [{
-      return build($_builder, $_state, lhs.getType(),
-                   ValueRange{lhs, rhs}, twoState);
-    }]>
-  ];
-}
-
-def ConcatOp : MIROp<"concat", [
-    Pure, DeclareOpInterfaceMethods<InferTypeOpInterface>
-]> {
-  let summary = "A concatenation of expressions";
-  let description = [{
-    This operation represents the SystemVerilog concatenation expression
-    `{x, y, z}`. See IEEE 1800-2017 §11.4.12 "Concatenation operators".
-
-    All operands must be simple bit vector types.
-
-    The concatenation result is a simple bit vector type. The result is unsigned
-    regardless of the sign of the operands (see concatenation-specific rules in
-    IEEE 1800-2017 §11.8.1 "Rules for expression types"). The size of the result
-    is the sum of the sizes of all operands. If any of the operands is
-    four-valued, the result is four-valued; otherwise it is two-valued.
-  }];
-  let arguments = (ins Variadic<SimpleBitVectorType>:$values);
-  let results = (outs SimpleBitVectorType:$result);
-  let assemblyFormat = [{
-    $values attr-dict `:` functional-type($values, $result)
-  }];
-}
-
 //===----------------------------------------------------------------------===//
 // Shift operations
 //===----------------------------------------------------------------------===//
