@@ -238,18 +238,51 @@ struct ExprVisitor {
     case BinaryOperator::LessThan:
       return createBinary<moore::LtOp>(lhs, rhs);
 
-    case BinaryOperator::LogicalAnd:
-      return builder.create<moore::LogicalOp>(loc, moore::Logic::LogicalAnd,
-                                              lhs, rhs);
-    case BinaryOperator::LogicalOr:
-      return builder.create<moore::LogicalOp>(loc, moore::Logic::LogicalOr, lhs,
-                                              rhs);
-    case BinaryOperator::LogicalImplication:
-      return builder.create<moore::LogicalOp>(
-          loc, moore::Logic::LogicalImplication, lhs, rhs);
-    case BinaryOperator::LogicalEquivalence:
-      return builder.create<moore::LogicalOp>(
-          loc, moore::Logic::LogicalEquivalence, lhs, rhs);
+    case BinaryOperator::LogicalAnd: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // TODO: This should short-circuit. Put the RHS code into an scf.if.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      return builder.create<moore::AndOp>(loc, lhs, rhs);
+    }
+
+    case BinaryOperator::LogicalOr: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // TODO: This should short-circuit. Put the RHS code into an scf.if.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      return builder.create<moore::OrOp>(loc, lhs, rhs);
+    }
+
+    case BinaryOperator::LogicalImplication: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // `(lhs -> rhs)` equivalent to `(!lhs || rhs)`.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      auto notLHS = builder.create<moore::NotOp>(loc, lhs);
+      return builder.create<moore::OrOp>(loc, notLHS, rhs);
+    }
+
+    case BinaryOperator::LogicalEquivalence: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // `(lhs <-> rhs)` equivalent to `(lhs && rhs) || (!lhs && !rhs)`.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      auto notLHS = builder.create<moore::NotOp>(loc, lhs);
+      auto notRHS = builder.create<moore::NotOp>(loc, rhs);
+      auto both = builder.create<moore::AndOp>(loc, lhs, rhs);
+      auto notBoth = builder.create<moore::AndOp>(loc, notLHS, notRHS);
+      return builder.create<moore::OrOp>(loc, both, notBoth);
+    }
+
     case BinaryOperator::LogicalShiftLeft:
       return builder.create<moore::ShlOp>(loc, lhs, rhs);
     case BinaryOperator::LogicalShiftRight:
