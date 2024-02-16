@@ -255,8 +255,8 @@ module Statements();
   int a, b;
 
   initial begin
-    // CHECK: [[ZERO:%.+]] = moore.constant 0 : !moore.int
-    // CHECK: [[COND:%.+]] = moore.mir.ne %a, [[ZERO]] : !moore.int, !moore.int
+    // CHECK: [[TMP:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[COND:%.+]] = moore.conversion [[TMP]] : !moore.bit -> i1
     // CHECK: scf.if [[COND]]
     if (a)
       ;

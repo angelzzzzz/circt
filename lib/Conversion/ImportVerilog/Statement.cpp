@@ -22,20 +22,13 @@ using namespace ImportVerilog;
 LogicalResult Context::visitConditionalStmt(
     const slang::ast::ConditionalStatement *conditionalStmt) {
   auto loc = convertLocation(conditionalStmt->sourceRange.start());
-  auto type = conditionalStmt->conditions.begin()->expr->type;
 
   Value cond = convertExpression(*conditionalStmt->conditions.begin()->expr);
   if (!cond)
     return failure();
-
-  // The numeric value of the if expression is tested for being zero.
-  // And if (expression) is equivalent to if (expression != 0).
-  // So the following code is for handling `if (expression)`.
-  if (!cond.getType().isa<mlir::IntegerType>()) {
-    auto zeroValue =
-        builder.create<moore::ConstantOp>(loc, convertType(*type), 0);
-    cond = builder.create<moore::InEqualityOp>(loc, cond, zeroValue);
-  }
+  cond = builder.create<moore::BoolCastOp>(loc, cond);
+  cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
+  // TODO: The above should probably be a `moore.bit_to_i1` op.
 
   auto ifOp = builder.create<mlir::scf::IfOp>(
       loc, cond, conditionalStmt->ifFalse != nullptr);
