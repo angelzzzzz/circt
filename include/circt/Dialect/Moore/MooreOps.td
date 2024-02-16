@@ -23,12 +23,6 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 class MooreOp<string mnemonic, list<Trait> traits = []> :
   Op<MooreDialect, mnemonic, traits>;
 
-// Base class for the MIR operations in this dialect.
-class MIROp<string mnemonic, list<Trait> traits = []> :
-  MooreOp<"mir." # mnemonic, traits>;
-
-include "circt/Dialect/Moore/MIRExpressions.td"
-
 //===----------------------------------------------------------------------===//
 // Structure
 //===----------------------------------------------------------------------===//
@@ -302,7 +296,7 @@ def ConversionOp : MooreOp<"conversion", [Pure]> {
     See IEEE 1800-2017 § 6.24 "Casting".
   }];
   let arguments = (ins AnyType:$input);
-  let results = (outs UnpackedType:$result);
+  let results = (outs AnyType:$result);
   let assemblyFormat = [{
     $input attr-dict `:` type($input) `->` type($result)
   }];
