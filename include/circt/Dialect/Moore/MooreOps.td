@@ -500,6 +500,42 @@ def XorOp : BinaryOpBase<"xor", [Commutative]> {
   }];
 }
 
+class ShiftOpBase<string mnemonic> : MooreOp<mnemonic, [
+  Pure,
+  TypesMatchWith<
+    "value and result types must match", "value", "result", "$_self">
+]> {
+  let description = [{
+    Shifts the `value` to the left or right by `amount` number of bits. The
+    result has the same type as the input value. The amount is always treated as
+    an unsigned number and has no effect on the signedness off the result. X or
+    Z bits in the input value are simply shifted left or right the same way 0 or
+    1 bits are. If the amount contains X or Z bits, all result bits are X.
+
+    `shl` shifts bits to the left, filling in 0 for the vacated least
+    significant bits. `shr` and `ashr` shift bits to the right; `shr` fills in
+    0 for the vacated most significant bits, and `ashr` copies the input's sign
+    bit into the vacated most significant bits. Note that in contrast to the SV
+    spec, the `ashr` _always_ fills in the sign bit regardless of the signedness
+    of the input.
+
+    `shl` corresponds to the `<<` and `<<<` operators. `shr` corresponds to the
+    `>>` operator, and the `>>>` operator applied to an unsigned value. `ashr`
+    corresponds to the `>>>` operator applied to a signed value.
+
+    See IEEE 1800-2017 § 11.4.10 "Shift operators".
+  }];
+  let arguments = (ins SimpleBitVectorType:$value, SimpleBitVectorType:$amount);
+  let results = (outs SimpleBitVectorType:$result);
+  let assemblyFormat = [{
+    $value `,` $amount attr-dict `:` type($value) `,` type($amount)
+  }];
+}
+
+def ShlOp : ShiftOpBase<"shl"> { let summary = "Logical left shift"; }
+def ShrOp : ShiftOpBase<"shr"> { let summary = "Logical right shift"; }
+def AShrOp : ShiftOpBase<"ashr"> { let summary = "Arithmetic right shift"; }
+
 class LogicalEqOpBase<string mnemonic> : MooreOp<mnemonic, [
   Pure,
   Commutative,

@@ -24,56 +24,6 @@ class BinOp<string mnemonic, list<Trait> traits = []> :
     "$lhs `,` $rhs (`bin` $twoState^)? attr-dict `:` functional-type($args, $results)";
 }
 
-//===----------------------------------------------------------------------===//
-// Shift operations
-//===----------------------------------------------------------------------===//
-
-class ShiftOp<string name> : MIROp<name, [
-    Pure, 
-    TypesMatchWith<"value and result types must match",
-                   "value", "result", "$_self">
-]> {
-  let arguments = (ins SimpleBitVectorType:$value,
-                       SimpleBitVectorType:$amount,
-                       UnitAttr:$arithmetic);
-  let results = (outs SimpleBitVectorType:$result);
-  let assemblyFormat = [{
-    ( `arithmetic` $arithmetic^ )? $value `,` $amount attr-dict
-    `:` type($value) `,` type($amount)
-  }];
-}
-
-def ShlOp : ShiftOp<"shl"> {
-  let summary = "A logical or arithmetic left-shift expression";
-  let description = [{
-    This operation represents the SystemVerilog logical and arithmetic
-    left-shift expressions `<<` and `<<<`.
-    See IEEE 1800-2017 §11.4.10 "Shift operators".
-
-    The value to be shifted and the amount must be simple bit vector types.
-    The shift result is of the same type as the input value.
-
-    The logical and arithmetic shift both insert zeros in place of the shifted
-    bits. 
-  }];
-}
-
-def ShrOp : ShiftOp<"shr"> {
-  let summary = "A logical or arithmetic right-shift expression";
-  let description = [{
-    This operation represents the SystemVerilog logical and arithmetic
-    right-shift expressions `>>` and `>>>`.
-    See IEEE 1800-2017 §11.4.10 "Shift operators".
-
-    The value to be shifted and the amount must be simple bit vector types.
-    The shift result is of the same type as the input value.
-
-    The logical shift always inserts zeros in place of the shifted bits.
-    The arithmetic shift inserts zeros if the result type is unsigned or the 
-    MSB (sign bit) if the result type is signed.
-  }];
-}
-
 //===---------------------------------------------------------------------===//
 // Equality operations
 //===---------------------------------------------------------------------===//

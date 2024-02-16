@@ -284,13 +284,25 @@ struct ExprVisitor {
     }
 
     case BinaryOperator::LogicalShiftLeft:
-      return builder.create<moore::ShlOp>(loc, lhs, rhs);
+      return createBinary<moore::ShlOp>(lhs, rhs);
     case BinaryOperator::LogicalShiftRight:
-      return builder.create<moore::ShrOp>(loc, lhs, rhs);
+      return createBinary<moore::ShrOp>(lhs, rhs);
     case BinaryOperator::ArithmeticShiftLeft:
-      return builder.create<moore::ShlOp>(loc, lhs, rhs, builder.getUnitAttr());
-    case BinaryOperator::ArithmeticShiftRight:
-      return builder.create<moore::ShrOp>(loc, lhs, rhs, builder.getUnitAttr());
+      return createBinary<moore::ShlOp>(lhs, rhs);
+    case BinaryOperator::ArithmeticShiftRight: {
+      // The `>>>` operator is an arithmetic right shift if the LHS operand is
+      // signed, or a logical right shift if the operand is unsigned.
+      lhs = convertToSimpleBitVector(lhs);
+      rhs = convertToSimpleBitVector(rhs);
+      if (!lhs || !rhs)
+        return {};
+      if (cast<moore::PackedType>(lhs.getType())
+              .getSimpleBitVector()
+              .isSigned())
+        return builder.create<moore::AShrOp>(loc, lhs, rhs);
+      return builder.create<moore::ShrOp>(loc, lhs, rhs);
+    }
+
     case BinaryOperator::Power:
       mlir::emitError(loc, "unsupported binary operator: power");
       return {};
