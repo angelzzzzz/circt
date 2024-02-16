@@ -49,8 +49,8 @@ func.func @UnrealizedConversionCast(%arg0: !moore.byte) -> !moore.shortint {
 func.func @Expressions(%arg0: !moore.bit, %arg1: !moore.logic, %arg2: !moore.packed<range<bit, 5:0>>, %arg3: !moore.packed<range<bit<signed>, 4:0>>) {
   // CHECK-NEXT: %0 = comb.concat %arg0, %arg0 : i1, i1
   // CHECK-NEXT: %1 = comb.concat %arg1, %arg1 : i1, i1
-  %0 = moore.mir.concat %arg0, %arg0 : (!moore.bit, !moore.bit) -> !moore.packed<range<bit, 1:0>>
-  %1 = moore.mir.concat %arg1, %arg1 : (!moore.logic, !moore.logic) -> !moore.packed<range<logic, 1:0>>
+  %0 = moore.concat %arg0, %arg0 : (!moore.bit, !moore.bit) -> !moore.packed<range<bit, 1:0>>
+  %1 = moore.concat %arg1, %arg1 : (!moore.logic, !moore.logic) -> !moore.packed<range<logic, 1:0>>
   // CHECK-NEXT: %[[V0:.+]] = hw.constant 0 : i5
   // CHECK-NEXT: %[[V1:.+]] = comb.concat %[[V0]], %arg0 : i5, i1
   // CHECK-NEXT: comb.shl %arg2, %[[V1]] : i6
