@@ -164,14 +164,27 @@ module Expressions();
     // CHECK: moore.lt %a, %b : !moore.int -> !moore.bit
     c = a < b;
 
-    // CHECK: moore.mir.logic and %a, %b : !moore.int, !moore.int
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: moore.and [[A]], [[B]] : !moore.bit
     c = a && b;
-    // CHECK: moore.mir.logic equiv %a, %b : !moore.int, !moore.int
-    c = a <-> b;
-    // CHECK: moore.mir.logic impl %a, %b : !moore.int, !moore.int
-    c = a -> b;
-    // CHECK: moore.mir.logic or %a, %b : !moore.int, !moore.int
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: moore.or [[A]], [[B]] : !moore.bit
     c = a || b;
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: [[NOT_A:%.+]] = moore.not [[A]] : !moore.bit
+    // CHECK: moore.or [[NOT_A]], [[B]] : !moore.bit
+    c = a -> b;
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: [[NOT_A:%.+]] = moore.not [[A]] : !moore.bit
+    // CHECK: [[NOT_B:%.+]] = moore.not [[B]] : !moore.bit
+    // CHECK: [[BOTH:%.+]] = moore.and [[A]], [[B]] : !moore.bit
+    // CHECK: [[NOT_BOTH:%.+]] = moore.and [[NOT_A]], [[NOT_B]] : !moore.bit
+    // CHECK: moore.or [[BOTH]], [[NOT_BOTH]] : !moore.bit
+    c = a <-> b;
 
     // CHECK: moore.mir.shl %a, %b : !moore.int, !moore.int
     c = a << b;
