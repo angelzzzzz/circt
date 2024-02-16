@@ -69,6 +69,7 @@ module Expressions();
   // CHECK: %b = moore.variable : !moore.int
   // CHECK: %c = moore.variable : !moore.int
   int a, b, c;
+  int unsigned u;
   bit [1:0][3:0] v;
   integer d, e, f;
   bit x;
@@ -221,14 +222,16 @@ module Expressions();
     // CHECK: moore.or [[BOTH]], [[NOT_BOTH]] : !moore.bit
     c = a <-> b;
 
-    // CHECK: moore.mir.shl %a, %b : !moore.int, !moore.int
+    // CHECK: moore.shl %a, %b : !moore.int, !moore.int
     c = a << b;
-    // CHECK: moore.mir.shr %a, %b : !moore.int, !moore.int
+    // CHECK: moore.shr %a, %b : !moore.int, !moore.int
     c = a >> b;
-    // CHECK: moore.mir.shl arithmetic %a, %b : !moore.int, !moore.int
+    // CHECK: moore.shl %a, %b : !moore.int, !moore.int
     c = a <<< b;
-    // CHECK: moore.mir.shr arithmetic %a, %b : !moore.int, !moore.int
+    // CHECK: moore.ashr %a, %b : !moore.int, !moore.int
     c = a >>> b;
+    // CHECK: moore.shr %u, %b : !moore.int<unsigned>, !moore.int
+    c = u >>> b;
   end
 endmodule
 
