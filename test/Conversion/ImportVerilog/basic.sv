@@ -45,7 +45,7 @@ module Expressions();
 
     // Unary operators
 
-    // CHECK: moore.mir.bpassign %c, %a : !moore.int
+    // CHECK: moore.bpassign %c, %a : !moore.int
     c = a;
     // CHECK: moore.neg %a : !moore.int
     c = -a;
@@ -82,23 +82,23 @@ module Expressions();
 
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, %a
+    // CHECK: moore.bpassign %a, [[TMP2]]
+    // CHECK: moore.bpassign %c, %a
     c = a++;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.sub %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, %a
+    // CHECK: moore.bpassign %a, [[TMP2]]
+    // CHECK: moore.bpassign %c, %a
     c = a--;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, [[TMP2]]
+    // CHECK: moore.bpassign %a, [[TMP2]]
+    // CHECK: moore.bpassign %c, [[TMP2]]
     c = ++a;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.sub %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]]
-    // CHECK: moore.mir.bpassign %c, [[TMP2]]
+    // CHECK: moore.bpassign %a, [[TMP2]]
+    // CHECK: moore.bpassign %c, [[TMP2]]
     c = --a;
 
     // Binary operators
@@ -222,11 +222,11 @@ module Assignments();
   int a, b;
 
   initial begin
-    // CHECK: moore.mir.bpassign %a, %b : !moore.int
+    // CHECK: moore.bpassign %a, %b : !moore.int
     a = b;
-    // CHECK: moore.mir.passign %a, %b : !moore.int
+    // CHECK: moore.passign %a, %b : !moore.int
     a <= b;
-    // CHECK: moore.mir.pcassign %a, %b : !moore.int
+    // CHECK: moore.pcassign %a, %b : !moore.int
     assign a = b;
   end
 endmodule

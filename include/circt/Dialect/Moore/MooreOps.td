@@ -160,6 +160,64 @@ def NetOp : MooreOp<"net", [
 // Statements
 //===----------------------------------------------------------------------===//
 
+def CAssignOp : MooreOp<"cassign", [SameTypeOperands]> {
+  let summary = "Continuous assignment";
+  let description = [{
+    A continuous assignment in module scope, such as `assign x = y;`.
+
+    See IEEE 1800-2017 § 10.3.2 "The continuous assignment statement".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
+def BPAssignOp : MooreOp<"bpassign", [SameTypeOperands]> {
+  let summary = "Blocking procedural assignment";
+  let description = [{
+    A blocking procedural assignment in a sequential block, such as `x = y;`.
+
+    See IEEE 1800-2017 § 10.4.1 "Blocking procedural assignments".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
+def PAssignOp : MooreOp<"passign", [SameTypeOperands]> {
+  let summary = "Nonblocking procedural assignment";
+  let description = [{
+    A nonblocking procedural assignment in a sequential block, such as `x <= y;`
+    or `x <= @(posedge y) z` or `x <= #1ns y`.
+
+    See IEEE 1800-2017 § 10.4.2 "Nonblocking procedural assignments".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
+def PCAssignOp : MooreOp<"pcassign", [SameTypeOperands]> {
+  let summary = "Procedural continuous assignment";
+  let description = [{
+    A procedural continuous assignment in a sequential block, such as
+    `assign x = y;`.
+
+    See IEEE 1800-2017 § 10.6 "Procedural continuous assignments".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
 def None: I32EnumAttrCase<"None", 0, "none">;
 def PosEdge: I32EnumAttrCase<"PosEdge", 1, "posedge">;
 def NegEdge: I32EnumAttrCase<"NegEdge", 2, "negedge">;
