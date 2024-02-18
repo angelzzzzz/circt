@@ -116,10 +116,6 @@ struct ExprVisitor {
     auto postValue =
         isInc ? builder.create<moore::AddOp>(loc, preValue, one).getResult()
               : builder.create<moore::SubOp>(loc, preValue, one).getResult();
-    if (isPost) {
-      preValue = builder.create<moore::VariableOp>(loc, preValue.getType(),
-                                                   "preValue", arg);
-    }
     builder.create<moore::BPAssignOp>(loc, arg, postValue);
     return postValue;
   }
@@ -191,7 +187,6 @@ struct ExprVisitor {
   }
 
   Value visit(const slang::ast::BinaryExpression &expr) {
-    auto type = context.convertType(*expr.type);
     auto lhs = context.convertExpression(expr.left());
     auto rhs = context.convertExpression(expr.right());
     if (!lhs || !rhs)
@@ -245,22 +240,71 @@ struct ExprVisitor {
     case BinaryOperator::LessThan:
       return createBinary<moore::LtOp>(lhs, rhs);
 
-    case BinaryOperator::LogicalAnd:
-      return builder.create<moore::LogicalAndOp>(loc, type, lhs, rhs);
-    case BinaryOperator::LogicalOr:
-      return builder.create<moore::LogicalOrOp>(loc, type, lhs, rhs);
-    case BinaryOperator::LogicalImplication:
-      return builder.create<moore::LogicalImplOp>(loc, type, lhs, rhs);
-    case BinaryOperator::LogicalEquivalence:
-      return builder.create<moore::LogicalEquivOp>(loc, type, lhs, rhs);
+    case BinaryOperator::LogicalAnd: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // TODO: This should short-circuit. Put the RHS code into an scf.if.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      return builder.create<moore::AndOp>(loc, lhs, rhs);
+    }
+
+    case BinaryOperator::LogicalOr: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // TODO: This should short-circuit. Put the RHS code into an scf.if.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      return builder.create<moore::OrOp>(loc, lhs, rhs);
+    }
+
+    case BinaryOperator::LogicalImplication: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // `(lhs -> rhs)` equivalent to `(!lhs || rhs)`.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      auto notLHS = builder.create<moore::NotOp>(loc, lhs);
+      return builder.create<moore::OrOp>(loc, notLHS, rhs);
+    }
+
+    case BinaryOperator::LogicalEquivalence: {
+      // See IEEE 1800-2017 § 11.4.7 "Logical operators".
+      // `(lhs <-> rhs)` equivalent to `(lhs && rhs) || (!lhs && !rhs)`.
+      lhs = convertToBool(lhs);
+      rhs = convertToBool(rhs);
+      if (!lhs || !rhs)
+        return {};
+      auto notLHS = builder.create<moore::NotOp>(loc, lhs);
+      auto notRHS = builder.create<moore::NotOp>(loc, rhs);
+      auto both = builder.create<moore::AndOp>(loc, lhs, rhs);
+      auto notBoth = builder.create<moore::AndOp>(loc, notLHS, notRHS);
+      return builder.create<moore::OrOp>(loc, both, notBoth);
+    }
+
     case BinaryOperator::LogicalShiftLeft:
-      return builder.create<moore::ShlOp>(loc, lhs, rhs);
+      return createBinary<moore::ShlOp>(lhs, rhs);
     case BinaryOperator::LogicalShiftRight:
-      return builder.create<moore::ShrOp>(loc, lhs, rhs);
+      return createBinary<moore::ShrOp>(lhs, rhs);
     case BinaryOperator::ArithmeticShiftLeft:
-      return builder.create<moore::ShlOp>(loc, lhs, rhs, builder.getUnitAttr());
-    case BinaryOperator::ArithmeticShiftRight:
-      return builder.create<moore::ShrOp>(loc, lhs, rhs, builder.getUnitAttr());
+      return createBinary<moore::ShlOp>(lhs, rhs);
+    case BinaryOperator::ArithmeticShiftRight: {
+      // The `>>>` operator is an arithmetic right shift if the LHS operand is
+      // signed, or a logical right shift if the operand is unsigned.
+      lhs = convertToSimpleBitVector(lhs);
+      rhs = convertToSimpleBitVector(rhs);
+      if (!lhs || !rhs)
+        return {};
+      if (cast<moore::PackedType>(lhs.getType())
+              .getSimpleBitVector()
+              .isSigned())
+        return builder.create<moore::AShrOp>(loc, lhs, rhs);
+      return builder.create<moore::ShrOp>(loc, lhs, rhs);
+    }
+
     case BinaryOperator::Power:
       mlir::emitError(loc, "unsupported binary operator: power");
       return {};
@@ -273,12 +317,9 @@ struct ExprVisitor {
   Value visit(const slang::ast::ConditionalExpression &expr) {
     Value cond = convertToSimpleBitVector(
         context.convertExpression(*expr.conditions.begin()->expr));
+    cond = convertToBool(cond);
     if (!cond)
       return {};
-    if (auto condType = dyn_cast_or_null<moore::UnpackedType>(cond.getType())) {
-      if (condType.isCastableToSimpleBitVector() && condType.getBitSize() != 1)
-        cond = builder.create<moore::BoolCastOp>(loc, cond);
-    }
     cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
     auto ifOp = builder.create<mlir::scf::IfOp>(
         loc, cond,
@@ -302,10 +343,13 @@ struct ExprVisitor {
 
     for (unsigned long i = 1; i < rangeList.size(); i++) {
       rhs = convertToSimpleBitVector(context.convertExpression(*rangeList[i]));
-      auto newEqOp = builder.create<moore::EqOp>(loc, lhs, rhs);
-      preValue = builder.create<moore::LogicalOrOp>(loc, newEqOp.getType(),
-                                                    preValue, newEqOp);
-      // TODO: Is it more efficient to use IfOp and YieldOp than LogicalOr?
+      Value newEqOp = builder.create<moore::EqOp>(loc, lhs, rhs);
+      preValue = convertToBool(preValue);
+      newEqOp = convertToBool(newEqOp);
+      if (!preValue || !newEqOp)
+        return {};
+      preValue = builder.create<moore::OrOp>(loc, preValue, newEqOp);
+      // TODO: This should short-circuit.
     }
     return preValue;
   }

@@ -36,6 +36,9 @@ add_circt_translation_library(CIRCTImportVerilog
   Expression.cpp
   TimingControl.cpp
 
+  DEPENDS
+  slang_slang
+
   LINK_LIBS PUBLIC
   CIRCTMoore
   MLIRTranslateLib

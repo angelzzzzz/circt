@@ -1027,17 +1027,11 @@ FIRRTLModuleLowering::lowerModule(FModuleOp oldModule, Block *topLevelModule,
     newModule.setCommentAttr(comment);
 
   // Copy over any attributes which are not required for FModuleOp.
-  SmallVector<StringRef, 12> attrNames = {"annotations",
-                                          "convention",
-                                          "portNames",
-                                          "sym_name",
-                                          "portDirections",
-                                          "portTypes",
-                                          "portAnnotations",
-                                          "portSyms",
-                                          "portLocations",
-                                          "parameters",
-                                          SymbolTable::getVisibilityAttrName()};
+  SmallVector<StringRef, 12> attrNames = {
+      "annotations",   "convention",      "layers",
+      "portNames",     "sym_name",        "portDirections",
+      "portTypes",     "portAnnotations", "portSyms",
+      "portLocations", "parameters",      SymbolTable::getVisibilityAttrName()};
 
   DenseSet<StringRef> attrSet(attrNames.begin(), attrNames.end());
   SmallVector<NamedAttribute> newAttrs(newModule->getAttrs());
@@ -3764,7 +3758,7 @@ LogicalResult FIRRTLLowering::visitExpr(ShrPrimOp op) {
   if (shiftAmount >= inWidth) {
     // Unsigned shift by full width returns a single-bit zero.
     if (type_cast<IntType>(op.getInput().getType()).isUnsigned())
-      return setLowering(op, getOrCreateIntConstant(1, 0));
+      return setLowering(op, {});
 
     // Signed shift by full width is equivalent to extracting the sign bit.
     shiftAmount = inWidth - 1;

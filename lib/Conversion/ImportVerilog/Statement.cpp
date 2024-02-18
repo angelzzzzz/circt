@@ -19,6 +19,20 @@
 using namespace circt;
 using namespace ImportVerilog;
 
+/// Helper function to convert a value to its "truthy" boolean value.
+Value Context::convertToBool(Value value, Location loc) {
+  if (!value)
+    return {};
+  if (auto type = dyn_cast_or_null<moore::IntType>(value.getType()))
+    if (type.getBitSize() == 1)
+      return value;
+  if (auto type = dyn_cast_or_null<moore::UnpackedType>(value.getType()))
+    return builder.create<moore::BoolCastOp>(loc, value);
+  mlir::emitError(loc, "expression of type ")
+      << value.getType() << " cannot be cast to a boolean";
+  return {};
+}
+
 LogicalResult Context::visitConditionalStmt(
     const slang::ast::ConditionalStatement *conditionalStmt) {
   auto loc = convertLocation(conditionalStmt->sourceRange.start());
@@ -26,15 +40,9 @@ LogicalResult Context::visitConditionalStmt(
   Value cond = convertExpression(*conditionalStmt->conditions.begin()->expr);
   if (!cond)
     return failure();
-
-  // The numeric value of the if expression is tested for being zero.
-  // And if (expression) is equivalent to if (expression != 0).
-  // So the following code is for handling `if (expression)`.
-  if (auto condType = dyn_cast_or_null<moore::UnpackedType>(cond.getType())) {
-    if (condType.isCastableToSimpleBitVector())
-      cond = builder.create<moore::BoolCastOp>(loc, cond);
-  }
+  cond = convertToBool(cond, loc);
   cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
+  // TODO: The above should probably be a `moore.bit_to_i1` op.
 
   auto ifOp = builder.create<mlir::scf::IfOp>(
       loc, cond, conditionalStmt->ifFalse != nullptr);
@@ -79,9 +87,14 @@ Context::visitCaseStmt(const slang::ast::CaseStatement *caseStmt) {
         if (i == 0 && j == 0)
           continue;
         itemExpr = convertExpression(*items[i].expressions[j]);
-        auto newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
-        preValue = builder.create<moore::LogicalOrOp>(loc, newEqOp.getType(),
-                                                      preValue, newEqOp);
+        Value newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+
+        preValue = convertToBool(preValue, loc);
+        newEqOp = convertToBool(newEqOp, loc);
+        if (!preValue || !newEqOp)
+          return failure();
+        preValue = builder.create<moore::OrOp>(loc, preValue, newEqOp);
+
         auto cond = builder.create<moore::ConversionOp>(
             loc, builder.getI1Type(), newEqOp);
         auto newIfOp = builder.create<mlir::scf::IfOp>(loc, cond);

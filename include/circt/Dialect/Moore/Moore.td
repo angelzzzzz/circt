@@ -14,9 +14,11 @@
 #define CIRCT_DIALECT_MOORE_MOORE
 
 include "mlir/IR/AttrTypeBase.td"
-include "mlir/IR/OpBase.td"
+include "mlir/IR/EnumAttr.td"
 include "mlir/IR/OpAsmInterface.td"
+include "mlir/IR/OpBase.td"
 include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 include "circt/Dialect/Moore/MooreDialect.td"
@@ -25,13 +27,7 @@ include "circt/Dialect/Moore/MooreDialect.td"
 class MooreOp<string mnemonic, list<Trait> traits = []> :
   Op<MooreDialect, mnemonic, traits>;
 
-// Base class for the MIR operations in this dialect.
-class MIROp<string mnemonic, list<Trait> traits = []> :
-  MooreOp<"mir." # mnemonic, traits>;
-
 include "circt/Dialect/Moore/MooreTypes.td"
-include "circt/Dialect/Moore/MIRExpressions.td"
-include "circt/Dialect/Moore/MIRStatements.td"
 include "circt/Dialect/Moore/MooreOps.td"
 
 #endif // CIRCT_DIALECT_MOORE_MOORE

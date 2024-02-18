@@ -1,4 +1,5 @@
 // RUN: circt-translate --import-verilog %s | FileCheck %s
+// REQUIRES: slang
 
 
 // CHECK-LABEL: moore.module @Variables
@@ -33,6 +34,7 @@ module Expressions();
   // CHECK: %b = moore.variable : !moore.int
   // CHECK: %c = moore.variable : !moore.int
   int a, b, c;
+  int unsigned u;
   bit [1:0][3:0] v;
   integer d, e, f;
   bit x;
@@ -44,7 +46,7 @@ module Expressions();
 
     // Unary operators
 
-    // CHECK: moore.mir.bpassign %c, %a : !moore.int
+    // CHECK: moore.bpassign %c, %a : !moore.int
     c = a;
     // CHECK: moore.neg %a : !moore.int
     c = -a;
@@ -79,25 +81,25 @@ module Expressions();
     // CHECK: moore.not [[TMP]] : !moore.bit
     x = !a;
 
-    // CHECK: moore.mir.bpassign %c, %a : !moore.int
+    // CHECK: moore.bpassign %c, %a : !moore.int
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
+    // CHECK: moore.bpassign %a, [[TMP2]] : !moore.int
     c = a++;
-    // CHECK: moore.mir.bpassign %c, %a : !moore.int
+    // CHECK: moore.bpassign %c, %a : !moore.int
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.sub %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
+    // CHECK: moore.bpassign %a, [[TMP2]] : !moore.int
     c = a--;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.add %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
-    // CHECK: moore.mir.bpassign %c, [[TMP2]] : !moore.int
+    // CHECK: moore.bpassign %a, [[TMP2]] : !moore.int
+    // CHECK: moore.bpassign %c, [[TMP2]] : !moore.int
     c = ++a;
     // CHECK: [[TMP1:%.+]] = moore.constant 1 : !moore.int
     // CHECK: [[TMP2:%.+]] = moore.sub %a, [[TMP1]] : !moore.int
-    // CHECK: moore.mir.bpassign %a, [[TMP2]] : !moore.int
-    // CHECK: moore.mir.bpassign %c, [[TMP2]] : !moore.int
+    // CHECK: moore.bpassign %a, [[TMP2]] : !moore.int
+    // CHECK: moore.bpassign %c, [[TMP2]] : !moore.int
     c = --a;
 
     // Binary operators
@@ -163,23 +165,38 @@ module Expressions();
     // CHECK: moore.lt %a, %b : !moore.int -> !moore.bit
     c = a < b;
 
-    // CHECK: moore.logical_and %a, %b : !moore.int, !moore.int -> !moore.bit
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: moore.and [[A]], [[B]] : !moore.bit
     c = a && b;
-    // CHECK: moore.logical_equiv %a, %b : !moore.int, !moore.int -> !moore.bit
-    c = a <-> b;
-    // CHECK: moore.logical_impl %a, %b : !moore.int, !moore.int -> !moore.bit
-    c = a -> b;
-    // CHECK: moore.logical_or %a, %b : !moore.int, !moore.int -> !moore.bit
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: moore.or [[A]], [[B]] : !moore.bit
     c = a || b;
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: [[NOT_A:%.+]] = moore.not [[A]] : !moore.bit
+    // CHECK: moore.or [[NOT_A]], [[B]] : !moore.bit
+    c = a -> b;
+    // CHECK: [[A:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[B:%.+]] = moore.bool_cast %b : !moore.int -> !moore.bit
+    // CHECK: [[NOT_A:%.+]] = moore.not [[A]] : !moore.bit
+    // CHECK: [[NOT_B:%.+]] = moore.not [[B]] : !moore.bit
+    // CHECK: [[BOTH:%.+]] = moore.and [[A]], [[B]] : !moore.bit
+    // CHECK: [[NOT_BOTH:%.+]] = moore.and [[NOT_A]], [[NOT_B]] : !moore.bit
+    // CHECK: moore.or [[BOTH]], [[NOT_BOTH]] : !moore.bit
+    c = a <-> b;
 
-    // CHECK: moore.mir.shl %a, %b : !moore.int, !moore.int
+    // CHECK: moore.shl %a, %b : !moore.int, !moore.int
     c = a << b;
-    // CHECK: moore.mir.shr %a, %b : !moore.int, !moore.int
+    // CHECK: moore.shr %a, %b : !moore.int, !moore.int
     c = a >> b;
-    // CHECK: moore.mir.shl arithmetic %a, %b : !moore.int, !moore.int
+    // CHECK: moore.shl %a, %b : !moore.int, !moore.int
     c = a <<< b;
-    // CHECK: moore.mir.shr arithmetic %a, %b : !moore.int, !moore.int
+    // CHECK: moore.ashr %a, %b : !moore.int, !moore.int
     c = a >>> b;
+    // CHECK: moore.shr %u, %b : !moore.int<unsigned>, !moore.int
+    c = u >>> b;
 
     // CHECK: [[TMP1:%.+]] = moore.gt %a, %b : !moore.int -> !moore.bit
     // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.bit -> i1
@@ -188,35 +205,34 @@ module Expressions();
     // CHECK: } else {
     // CHECK:   scf.yield %b : !moore.int
     // CHECK: }
-    // CHECK: moore.mir.bpassign %c, [[TMP3]] : !moore.int
+    // CHECK: moore.bpassign %c, [[TMP3]] : !moore.int
     c = a > b ? a : b;
 
     // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
     // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.bit -> !moore.packed<range<logic, 31:0>>
     // CHECK: [[TMP3:%.+]] = moore.conversion [[TMP2]] : !moore.packed<range<logic, 31:0>> -> !moore.int
-    // CHECK: moore.mir.bpassign %c, [[TMP3]] : !moore.int
+    // CHECK: moore.bpassign %c, [[TMP3]] : !moore.int
     c = a inside {a};
 
     // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
     // CHECK: [[TMP2:%.+]] = moore.eq %a, %b : !moore.int -> !moore.bit
-    // CHECK: [[TMP3:%.+]] = moore.logical_or [[TMP1]], [[TMP2]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP3:%.+]] = moore.or [[TMP1]], [[TMP2]] : !moore.bit
     // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.bit -> !moore.packed<range<logic, 31:0>>
     // CHECK: [[TMP5:%.+]] = moore.conversion [[TMP4]] : !moore.packed<range<logic, 31:0>> -> !moore.int
-    // CHECK: moore.mir.bpassign %c, [[TMP5]] : !moore.int
+    // CHECK: moore.bpassign %c, [[TMP5]] : !moore.int
     c = a inside {a, b};
 
     // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
     // CHECK: [[TMP2:%.+]] = moore.eq %a, %b : !moore.int -> !moore.bit
-    // CHECK: [[TMP3:%.+]] = moore.logical_or [[TMP1]], [[TMP2]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP3:%.+]] = moore.or [[TMP1]], [[TMP2]] : !moore.bit
     // CHECK: [[TMP4:%.+]] = moore.eq %a, %a : !moore.int -> !moore.bit
-    // CHECK: [[TMP5:%.+]] = moore.logical_or [[TMP3]], [[TMP4]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP5:%.+]] = moore.or [[TMP3]], [[TMP4]] : !moore.bit
     // CHECK: [[TMP6:%.+]] = moore.eq %a, %b : !moore.int -> !moore.bit
-    // CHECK: [[TMP7:%.+]] = moore.logical_or [[TMP5]], [[TMP6]] : !moore.bit, !moore.bit -> !moore.bit
+    // CHECK: [[TMP7:%.+]] = moore.or [[TMP5]], [[TMP6]] : !moore.bit
     // CHECK: [[TMP8:%.+]] = moore.conversion [[TMP7]] : !moore.bit -> !moore.packed<range<logic, 31:0>>
     // CHECK: [[TMP9:%.+]] = moore.conversion [[TMP8]] : !moore.packed<range<logic, 31:0>> -> !moore.int
-    // CHECK: moore.mir.bpassign %c, [[TMP9]] : !moore.int
+    // CHECK: moore.bpassign %c, [[TMP9]] : !moore.int
     c = a inside {a, b, a, b};
-
   end
 endmodule
 
@@ -258,11 +274,11 @@ module Assignments();
   int a, b;
 
   initial begin
-    // CHECK: moore.mir.bpassign %a, %b : !moore.int
+    // CHECK: moore.bpassign %a, %b : !moore.int
     a = b;
-    // CHECK: moore.mir.passign %a, %b : !moore.int
+    // CHECK: moore.passign %a, %b : !moore.int
     a <= b;
-    // CHECK: moore.mir.pcassign %a, %b : !moore.int
+    // CHECK: moore.pcassign %a, %b : !moore.int
     assign a = b;
   end
 endmodule
@@ -276,9 +292,9 @@ module Statements();
 
   initial begin
 
-    // CHECK: [[TMP1:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
-    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.bit -> i1
-    // CHECK: scf.if [[TMP2:%.+]]
+    // CHECK: [[TMP:%.+]] = moore.bool_cast %a : !moore.int -> !moore.bit
+    // CHECK: [[COND:%.+]] = moore.conversion [[TMP]] : !moore.bit -> i1
+    // CHECK: scf.if [[COND]]
     if (a)
       ;
 
@@ -339,6 +355,5 @@ module Generates();
         int e = 3;
       end
     endcase
-    
   endgenerate
 endmodule

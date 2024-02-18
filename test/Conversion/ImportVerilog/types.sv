@@ -1,4 +1,5 @@
 // RUN: circt-translate --import-verilog %s | FileCheck %s
+// REQUIRES: slang
 
 // CHECK-LABEL: moore.module @Enums
 module Enums;

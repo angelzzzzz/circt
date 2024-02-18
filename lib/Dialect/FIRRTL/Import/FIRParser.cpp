@@ -25,6 +25,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Threading.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Support/Timing.h"
@@ -167,19 +168,27 @@ struct FIRParser {
   //===--------------------------------------------------------------------===//
 
   ParseResult requireFeature(FIRVersion minimum, StringRef feature) {
+    return requireFeature(minimum, feature, getToken().getLoc());
+  }
+
+  ParseResult requireFeature(FIRVersion minimum, StringRef feature, SMLoc loc) {
     if (version < minimum)
-      return emitError() << feature << " are a FIRRTL " << minimum
-                         << "+ feature, but the specified FIRRTL version was "
-                         << version;
+      return emitError(loc)
+             << feature << " are a FIRRTL " << minimum
+             << "+ feature, but the specified FIRRTL version was " << version;
     return success();
   }
 
   ParseResult removedFeature(FIRVersion removedVersion, StringRef feature) {
+    return removedFeature(removedVersion, feature, getToken().getLoc());
+  }
+
+  ParseResult removedFeature(FIRVersion removedVersion, StringRef feature,
+                             SMLoc loc) {
     if (version >= removedVersion)
-      return emitError() << feature << " were removed in FIRRTL "
-                         << removedVersion
-                         << ", but the specified FIRRTL version was "
-                         << version;
+      return emitError(loc)
+             << feature << " were removed in FIRRTL " << removedVersion
+             << ", but the specified FIRRTL version was " << version;
     return success();
   }
 
@@ -1493,7 +1502,8 @@ struct LazyLocationListener : public OpBuilder::Listener {
 
   // Notification handler for when an operation is inserted into the builder.
   /// `op` is the operation that was inserted.
-  void notifyOperationInserted(Operation *op) override {
+  void notifyOperationInserted(Operation *op,
+                               mlir::IRRewriter::InsertPoint) override {
     assert(currentSMLoc != SMLoc() && "No .fir file location specified");
     assert(isActive && "Not parsing a statement");
     subOps.push_back({op, currentSMLoc});
@@ -2242,6 +2252,10 @@ ParseResult FIRStmtParser::parsePrimExp(Value &result) {
   case FIRToken::lp_tail:
     attrNames.push_back(getConstants().amountIdentifier);
     break;
+  case FIRToken::lp_integer_add:
+    if (requireFeature({4, 0, 0}, "Integer arithmetic expressions", loc))
+      return failure();
+    break;
   }
 
   if (operands.size() != numOperandsExpected) {
@@ -2276,12 +2290,23 @@ ParseResult FIRStmtParser::parsePrimExp(Value &result) {
       return failure();                                                        \
     }                                                                          \
     result = builder.create<CLASS>(resultTy, operands, attrs);                 \
-    return success();                                                          \
+    break;                                                                     \
   }
 #include "FIRTokenKinds.def"
   }
-
-  llvm_unreachable("all cases should return");
+  // Don't add code here, the common cases of these switch statements will be
+  // merged. This allows for fixing up primops after they have been created.
+  switch (kind) {
+  default:
+    break;
+  case FIRToken::lp_shr:
+    // For FIRRTL versions earlier than 4.0.0, insert pad(_, 1) around any
+    // unsigned shr This ensures the minimum width is 1 (but can be greater)
+    if (version < FIRVersion(4, 0, 0) && type_isa<UIntType>(result.getType()))
+      result = builder.create<PadPrimOp>(result, 1);
+    break;
+  }
+  return success();
 }
 
 /// integer-literal-exp ::= 'UInt' optional-width '(' intLit ')'
@@ -4432,6 +4457,8 @@ private:
   ParseResult parseIntModule(CircuitOp circuit, unsigned indent);
   ParseResult parseModule(CircuitOp circuit, bool isPublic, unsigned indent);
 
+  ParseResult parseLayerName(SymbolRefAttr &result);
+  ParseResult parseOptionalEnabledLayers(ArrayAttr &result);
   ParseResult parsePortList(SmallVectorImpl<PortInfo> &resultPorts,
                             SmallVectorImpl<SMLoc> &resultPortLocs,
                             unsigned indent);
@@ -4515,6 +4542,47 @@ ParseResult FIRCircuitParser::importOMIR(CircuitOp circuit, SMLoc loc,
     return failure();
   }
 
+  return success();
+}
+
+ParseResult FIRCircuitParser::parseLayerName(SymbolRefAttr &result) {
+  auto *context = getContext();
+  SmallVector<StringRef> strings;
+  do {
+    StringRef name;
+    if (parseId(name, "expected layer name"))
+      return failure();
+    strings.push_back(name);
+  } while (consumeIf(FIRToken::period));
+
+  SmallVector<FlatSymbolRefAttr> nested;
+  nested.reserve(strings.size() - 1);
+  for (unsigned i = 1, e = strings.size(); i < e; ++i)
+    nested.push_back(FlatSymbolRefAttr::get(context, strings[i]));
+
+  result = SymbolRefAttr::get(context, strings[0], nested);
+  return success();
+}
+
+ParseResult FIRCircuitParser::parseOptionalEnabledLayers(ArrayAttr &result) {
+  if (getToken().getKind() != FIRToken::kw_enablelayer) {
+    result = ArrayAttr::get(getContext(), {});
+    return success();
+  }
+
+  if (requireFeature({4, 0, 0}, "modules with layers enabled"))
+    return failure();
+
+  SmallVector<Attribute> layers;
+  do {
+    SymbolRefAttr layer;
+    consumeToken();
+    if (parseLayerName(layer))
+      return failure();
+    layers.push_back(layer);
+  } while (getToken().getKind() == FIRToken::kw_enablelayer);
+
+  result = ArrayAttr::get(getContext(), layers);
   return success();
 }
 
@@ -4871,11 +4939,13 @@ ParseResult FIRCircuitParser::parseExtClass(CircuitOp circuit,
 ParseResult FIRCircuitParser::parseExtModule(CircuitOp circuit,
                                              unsigned indent) {
   StringAttr name;
+  ArrayAttr layers;
   SmallVector<PortInfo, 8> portList;
   SmallVector<SMLoc> portLocs;
   LocWithInfo info(getToken().getLoc(), this);
   consumeToken(FIRToken::kw_extmodule);
   if (parseId(name, "expected extmodule name") ||
+      parseOptionalEnabledLayers(layers) ||
       parseToken(FIRToken::colon, "expected ':' in extmodule definition") ||
       info.parseOptionalInfo() || parsePortList(portList, portLocs, indent))
     return failure();
@@ -4903,7 +4973,7 @@ ParseResult FIRCircuitParser::parseExtModule(CircuitOp circuit,
   auto annotations = ArrayAttr::get(getContext(), {});
   auto extModuleOp = builder.create<FExtModuleOp>(
       info.getLoc(), name, conventionAttr, portList, defName, annotations,
-      parameters, internalPaths);
+      parameters, internalPaths, layers);
   auto visibility = isMainModule ? SymbolTable::Visibility::Public
                                  : SymbolTable::Visibility::Private;
   SymbolTable::setSymbolVisibility(extModuleOp, visibility);
@@ -4917,11 +4987,13 @@ ParseResult FIRCircuitParser::parseExtModule(CircuitOp circuit,
 ParseResult FIRCircuitParser::parseIntModule(CircuitOp circuit,
                                              unsigned indent) {
   StringAttr name;
+  ArrayAttr layers;
   SmallVector<PortInfo, 8> portList;
   SmallVector<SMLoc> portLocs;
   LocWithInfo info(getToken().getLoc(), this);
   consumeToken(FIRToken::kw_intmodule);
   if (parseId(name, "expected intmodule name") ||
+      parseOptionalEnabledLayers(layers) ||
       parseToken(FIRToken::colon, "expected ':' in intmodule definition") ||
       info.parseOptionalInfo() || parsePortList(portList, portLocs, indent))
     return failure();
@@ -4942,7 +5014,7 @@ ParseResult FIRCircuitParser::parseIntModule(CircuitOp circuit,
   auto builder = circuit.getBodyBuilder();
   builder
       .create<FIntModuleOp>(info.getLoc(), name, portList, intName, annotations,
-                            parameters, internalPaths)
+                            parameters, internalPaths, layers)
       .setPrivate();
   return success();
 }
@@ -4953,9 +5025,11 @@ ParseResult FIRCircuitParser::parseModule(CircuitOp circuit, bool isPublic,
   StringAttr name;
   SmallVector<PortInfo, 8> portList;
   SmallVector<SMLoc> portLocs;
+  ArrayAttr layers;
   LocWithInfo info(getToken().getLoc(), this);
   consumeToken(FIRToken::kw_module);
   if (parseId(name, "expected module name") ||
+      parseOptionalEnabledLayers(layers) ||
       parseToken(FIRToken::colon, "expected ':' in module definition") ||
       info.parseOptionalInfo() || parsePortList(portList, portLocs, indent))
     return failure();
@@ -4970,7 +5044,7 @@ ParseResult FIRCircuitParser::parseModule(CircuitOp circuit, bool isPublic,
   auto conventionAttr = ConventionAttr::get(getContext(), convention);
   auto builder = circuit.getBodyBuilder();
   auto moduleOp = builder.create<FModuleOp>(info.getLoc(), name, conventionAttr,
-                                            portList, annotations);
+                                            portList, annotations, layers);
 
   auto visibility = isPublic ? SymbolTable::Visibility::Public
                              : SymbolTable::Visibility::Private;

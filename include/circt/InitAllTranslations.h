@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "circt/Conversion/ImportVerilog.h"
+#include "circt/Dialect/Arc/ModelInfoExport.h"
 #include "circt/Dialect/Calyx/CalyxEmitter.h"
 #include "circt/Dialect/ESI/ESIDialect.h"
 #include "circt/Dialect/FIRRTL/FIREmitter.h"
@@ -30,6 +31,7 @@ namespace circt {
 // automatically.
 inline void registerAllTranslations() {
   static bool initOnce = []() {
+    arc::registerArcModelInfoTranslation();
     calyx::registerToCalyxTranslation();
     firrtl::registerFromFIRFileTranslation();
     firrtl::registerToFIRFileTranslation();

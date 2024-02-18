@@ -160,6 +160,64 @@ def NetOp : MooreOp<"net", [
 // Statements
 //===----------------------------------------------------------------------===//
 
+def CAssignOp : MooreOp<"cassign", [SameTypeOperands]> {
+  let summary = "Continuous assignment";
+  let description = [{
+    A continuous assignment in module scope, such as `assign x = y;`.
+
+    See IEEE 1800-2017 § 10.3.2 "The continuous assignment statement".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
+def BPAssignOp : MooreOp<"bpassign", [SameTypeOperands]> {
+  let summary = "Blocking procedural assignment";
+  let description = [{
+    A blocking procedural assignment in a sequential block, such as `x = y;`.
+
+    See IEEE 1800-2017 § 10.4.1 "Blocking procedural assignments".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
+def PAssignOp : MooreOp<"passign", [SameTypeOperands]> {
+  let summary = "Nonblocking procedural assignment";
+  let description = [{
+    A nonblocking procedural assignment in a sequential block, such as `x <= y;`
+    or `x <= @(posedge y) z` or `x <= #1ns y`.
+
+    See IEEE 1800-2017 § 10.4.2 "Nonblocking procedural assignments".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
+def PCAssignOp : MooreOp<"pcassign", [SameTypeOperands]> {
+  let summary = "Procedural continuous assignment";
+  let description = [{
+    A procedural continuous assignment in a sequential block, such as
+    `assign x = y;`.
+
+    See IEEE 1800-2017 § 10.6 "Procedural continuous assignments".
+  }];
+  let arguments = (ins AnyType:$dest, AnyType:$src);
+  let results = (outs);
+  let assemblyFormat = [{
+    $dest `,` $src  attr-dict `:` qualified(type($src))
+  }];
+}
+
 def None: I32EnumAttrCase<"None", 0, "none">;
 def PosEdge: I32EnumAttrCase<"PosEdge", 1, "posedge">;
 def NegEdge: I32EnumAttrCase<"NegEdge", 2, "negedge">;
@@ -468,6 +526,42 @@ def XorOp : BinaryOpBase<"xor", [Commutative]> {
   }];
 }
 
+class ShiftOpBase<string mnemonic> : MooreOp<mnemonic, [
+  Pure,
+  TypesMatchWith<
+    "value and result types must match", "value", "result", "$_self">
+]> {
+  let description = [{
+    Shifts the `value` to the left or right by `amount` number of bits. The
+    result has the same type as the input value. The amount is always treated as
+    an unsigned number and has no effect on the signedness off the result. X or
+    Z bits in the input value are simply shifted left or right the same way 0 or
+    1 bits are. If the amount contains X or Z bits, all result bits are X.
+
+    `shl` shifts bits to the left, filling in 0 for the vacated least
+    significant bits. `shr` and `ashr` shift bits to the right; `shr` fills in
+    0 for the vacated most significant bits, and `ashr` copies the input's sign
+    bit into the vacated most significant bits. Note that in contrast to the SV
+    spec, the `ashr` _always_ fills in the sign bit regardless of the signedness
+    of the input.
+
+    `shl` corresponds to the `<<` and `<<<` operators. `shr` corresponds to the
+    `>>` operator, and the `>>>` operator applied to an unsigned value. `ashr`
+    corresponds to the `>>>` operator applied to a signed value.
+
+    See IEEE 1800-2017 § 11.4.10 "Shift operators".
+  }];
+  let arguments = (ins SimpleBitVectorType:$value, SimpleBitVectorType:$amount);
+  let results = (outs SimpleBitVectorType:$result);
+  let assemblyFormat = [{
+    $value `,` $amount attr-dict `:` type($value) `,` type($amount)
+  }];
+}
+
+def ShlOp : ShiftOpBase<"shl"> { let summary = "Logical left shift"; }
+def ShrOp : ShiftOpBase<"shr"> { let summary = "Logical right shift"; }
+def AShrOp : ShiftOpBase<"ashr"> { let summary = "Arithmetic right shift"; }
+
 class LogicalEqOpBase<string mnemonic> : MooreOp<mnemonic, [
   Pure,
   Commutative,
@@ -590,26 +684,27 @@ def LeOp : RelationalOpBase<"le"> { let summary = "Less than or equal"; }
 def GtOp : RelationalOpBase<"gt"> { let summary = "Greater than"; }
 def GeOp : RelationalOpBase<"ge"> { let summary = "Greater than or equal"; }
 
-class LogicalOpBase<string mnemonic, string operatorName> : 
-                      MooreOp<mnemonic, [Pure]>{
-  let summary = !subst("$op", operatorName, "Logical $op operator");
-  let description = !subst("$op", operatorName, [{
-    The result of the evaluation of a logical operation shall be `1`, `0`, 
-    or, if the result is ambiguous, the unkonw value `x`.
+def ConcatOp : MooreOp<"concat", [
+    Pure, DeclareOpInterfaceMethods<InferTypeOpInterface>
+]> {
+  let summary = "A concatenation of expressions";
+  let description = [{
+    This operation represents the SystemVerilog concatenation expression
+    `{x, y, z}`. See IEEE 1800-2017 §11.4.12 "Concatenation operators".
 
-    See IEEE 1800-2017 § 11.4.7 "Logical operators".
-  }]);
-  let arguments = (ins SimpleBitVectorType:$lhs, SimpleBitVectorType:$rhs);
-  let results = (outs SingleBitType:$result);
-  let assemblyFormat = [{
-    $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($result)
+    All operands must be simple bit vector types.
+
+    The concatenation result is a simple bit vector type. The result is unsigned
+    regardless of the sign of the operands (see concatenation-specific rules in
+    IEEE 1800-2017 §11.8.1 "Rules for expression types"). The size of the result
+    is the sum of the sizes of all operands. If any of the operands is
+    four-valued, the result is four-valued; otherwise it is two-valued.
   }];
-  // TODO: Add a type constraint to lhs and rhs.
+  let arguments = (ins Variadic<SimpleBitVectorType>:$values);
+  let results = (outs SimpleBitVectorType:$result);
+  let assemblyFormat = [{
+    $values attr-dict `:` functional-type($values, $result)
+  }];
 }
-
-def LogicalAndOp : LogicalOpBase<"logical_and", "and">;
-def LogicalOrOp : LogicalOpBase<"logical_or", "or">;
-def LogicalImplOp : LogicalOpBase<"logical_impl", "implication">;
-def LogicalEquivOp : LogicalOpBase<"logical_equiv", "equivalence">;
 
 #endif // CIRCT_DIALECT_MOORE_MOOREOPS

@@ -32,9 +32,9 @@ namespace ImportVerilog {
 struct Context {
   Context(mlir::ModuleOp intoModuleOp,
           const slang::SourceManager &sourceManager,
-          std::function<StringRef(slang::BufferID)> getBufferFilePath)
+          SmallDenseMap<slang::BufferID, StringRef> &bufferFilePaths)
       : intoModuleOp(intoModuleOp), sourceManager(sourceManager),
-        getBufferFilePath(std::move(getBufferFilePath)),
+        bufferFilePaths(bufferFilePaths),
         rootBuilder(OpBuilder::atBlockEnd(intoModuleOp.getBody())),
         builder(OpBuilder::atBlockEnd(intoModuleOp.getBody())),
         symbolTable(intoModuleOp) {}
@@ -60,6 +60,8 @@ struct Context {
 
   // Convert a slang statement into an MLIR statement.
   LogicalResult convertStatement(const slang::ast::Statement *statement);
+
+  Value convertToBool(Value value, Location loc);
 
   LogicalResult
   visitConditionalStmt(const slang::ast::ConditionalStatement *conditionalStmt);
@@ -95,7 +97,7 @@ struct Context {
 
   mlir::ModuleOp intoModuleOp;
   const slang::SourceManager &sourceManager;
-  std::function<StringRef(slang::BufferID)> getBufferFilePath;
+  SmallDenseMap<slang::BufferID, StringRef> &bufferFilePaths;
 
   /// A builder for modules and other top-level ops.
   OpBuilder rootBuilder;
@@ -121,10 +123,10 @@ struct Context {
 };
 
 /// Convert a slang `SourceLocation` to an MLIR `Location`.
-Location convertLocation(
-    MLIRContext *context, const slang::SourceManager &sourceManager,
-    llvm::function_ref<StringRef(slang::BufferID)> getBufferFilePath,
-    slang::SourceLocation loc);
+Location
+convertLocation(MLIRContext *context, const slang::SourceManager &sourceManager,
+                SmallDenseMap<slang::BufferID, StringRef> &bufferFilePaths,
+                slang::SourceLocation loc);
 
 } // namespace ImportVerilog
 } // namespace circt

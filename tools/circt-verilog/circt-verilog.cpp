@@ -31,6 +31,8 @@ using namespace circt;
 //===----------------------------------------------------------------------===//
 
 namespace {
+enum class LoweringMode { OnlyPreprocess, OnlyLint, OnlyParse, Full };
+
 struct CLOptions {
   cl::OptionCategory cat{"Verilog Frontend Options"};
 
@@ -47,24 +49,19 @@ struct CLOptions {
                "corresponding line"),
       cl::init(false), cl::Hidden, cl::cat(cat)};
 
-  cl::opt<bool> onlyPreprocess{
-      "E", cl::desc("Only run the preprocessor (and print preprocessed files)"),
-      cl::init(false), cl::cat(cat)};
-  cl::alias onlyPreprocessLong{"preprocess-only", cl::desc("Alias for -E"),
-                               cl::aliasopt(onlyPreprocess), cl::NotHidden,
-                               cl::cat(cat)};
-
-  cl::opt<bool> onlyLint{
-      "lint-only",
-      cl::desc(
-          "Only lint the input, without elaboration and mapping to CIRCT IR"),
-      cl::init(false), cl::cat(cat)};
-
-  cl::opt<bool> onlyParse{
-      "parse-only",
-      cl::desc(
-          "Only parse and elaborate the input, without mapping to CIRCT IR"),
-      cl::init(false), cl::cat(cat)};
+  cl::opt<LoweringMode> loweringMode{
+      cl::desc("Specify how to process the input:"),
+      cl::values(
+          clEnumValN(
+              LoweringMode::OnlyPreprocess, "E",
+              "Only run the preprocessor (and print preprocessed files)"),
+          clEnumValN(LoweringMode::OnlyLint, "lint-only",
+                     "Only lint the input, without elaboration and mapping to "
+                     "CIRCT IR"),
+          clEnumValN(LoweringMode::OnlyParse, "parse-only",
+                     "Only parse and elaborate the input, without mapping to "
+                     "CIRCT IR")),
+      cl::init(LoweringMode::Full), cl::cat(cat)};
 
   //===--------------------------------------------------------------------===//
   // Include paths
@@ -106,7 +103,7 @@ struct CLOptions {
 
   cl::list<std::string> defines{
       "D",
-      cl::desc("Define <macro> to <value> (or 1 if <value> ommitted) in all "
+      cl::desc("Define <macro> to <value> (or 1 if <value> omitted) in all "
                "source files"),
       cl::value_desc("<macro>=<value>"), cl::Prefix, cl::cat(cat)};
   cl::alias definesLong{"define-macro", cl::desc("Alias for -D"),
@@ -125,11 +122,9 @@ struct CLOptions {
 
   cl::opt<bool> librariesInheritMacros{
       "libraries-inherit-macros",
-      cl::desc(
-          "If true, library files will inherit macro definitions from the "
-          "primary "
-          "source "
-          "files. --single-unit must also be passed when this option is used."),
+      cl::desc("If true, library files will inherit macro definitions from the "
+               "primary source files. --single-unit must also be passed when "
+               "this option is used."),
       cl::init(false), cl::cat(cat)};
 
   //===--------------------------------------------------------------------===//
@@ -218,8 +213,10 @@ static LogicalResult executeWithSources(MLIRContext *context,
 
   // Map the command line options to `ImportVerilog`'s conversion options.
   ImportVerilogOptions options;
-  options.onlyLint = opts.onlyLint;
-  options.onlyParse = opts.onlyParse;
+  if (opts.loweringMode == LoweringMode::OnlyLint)
+    options.mode = ImportVerilogOptions::Mode::OnlyLint;
+  else if (opts.loweringMode == LoweringMode::OnlyParse)
+    options.mode = ImportVerilogOptions::Mode::OnlyParse;
 
   options.includeDirs = opts.includeDirs;
   options.includeSystemDirs = opts.includeSystemDirs;
@@ -237,7 +234,7 @@ static LogicalResult executeWithSources(MLIRContext *context,
     options.timeScale = opts.timeScale;
   options.allowUseBeforeDeclare = opts.allowUseBeforeDeclare;
   options.ignoreUnknownModules = opts.ignoreUnknownModules;
-  if (!opts.onlyLint)
+  if (opts.loweringMode != LoweringMode::OnlyLint)
     options.topModules = opts.topModules;
   options.paramOverrides = opts.paramOverrides;
 
@@ -259,7 +256,7 @@ static LogicalResult executeWithSources(MLIRContext *context,
 
   // If the user requested for the files to be only preprocessed, do so and
   // print the results to the configured output file.
-  if (opts.onlyPreprocess) {
+  if (opts.loweringMode == LoweringMode::OnlyPreprocess) {
     auto result =
         preprocessVerilog(sourceMgr, context, ts, outputFile->os(), &options);
     if (succeeded(result))
@@ -281,7 +278,7 @@ static LogicalResult executeWithSources(MLIRContext *context,
 static LogicalResult execute(MLIRContext *context) {
   // Open the input files.
   llvm::SourceMgr sourceMgr;
-  for (auto inputFilename : opts.inputFilenames) {
+  for (const auto &inputFilename : opts.inputFilenames) {
     std::string errorMessage;
     auto buffer = openInputFile(inputFilename, &errorMessage);
     if (!buffer) {
@@ -298,10 +295,9 @@ static LogicalResult execute(MLIRContext *context) {
     context->printOpOnDiagnostic(false);
     (void)executeWithSources(context, sourceMgr);
     return handler.verify();
-  } else {
-    SourceMgrDiagnosticHandler handler(sourceMgr, context);
-    return executeWithSources(context, sourceMgr);
   }
+  SourceMgrDiagnosticHandler handler(sourceMgr, context);
+  return executeWithSources(context, sourceMgr);
 }
 
 int main(int argc, char **argv) {
