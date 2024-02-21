@@ -55,12 +55,14 @@ struct Context {
   moore::SVModuleOp
   convertModuleHeader(const slang::ast::InstanceBodySymbol *module);
   LogicalResult convertModuleBody(const slang::ast::InstanceBodySymbol *module);
+  LogicalResult walkMember(const slang::ast::Symbol &members);
+  LogicalResult
+  convertStatementBlock(const slang::ast::StatementBlockSymbol *stmt);
 
   // Convert a slang statement into an MLIR statement.
   LogicalResult convertStatement(const slang::ast::Statement *statement);
 
-  LogicalResult
-  visitConditionalStmt(const slang::ast::ConditionalStatement *conditionalStmt);
+  void createPostValue(Location loc);
 
   // Convert a slang expression into an MLIR expression.
   Value convertExpression(const slang::ast::Expression &expr);
@@ -110,6 +112,8 @@ struct Context {
   /// A list of modules for which the header has been created, but the body has
   /// not been converted yet.
   std::queue<const slang::ast::InstanceBodySymbol *> moduleWorklist;
+  /// A list of value needs increment or decrement.
+  std::queue<std::tuple<Value, bool>> postValueList;
 
 private:
   std::vector<mlir::Value *> lvalueStack;

@@ -24,6 +24,7 @@ struct ExprVisitor {
   Context &context;
   Location loc;
   OpBuilder &builder;
+  std::queue<std::tuple<Value, bool>> &postValueList;
 
   /// Helper function to convert a value to its simple bit vector
   /// representation, if it has one. Otherwise returns null.
@@ -109,6 +110,10 @@ struct ExprVisitor {
     auto preValue = convertToSimpleBitVector(arg);
     if (!preValue)
       return {};
+    if (isPost) {
+      postValueList.emplace(preValue, isInc);
+      return preValue;
+    }
     auto sbvt =
         cast<moore::UnpackedType>(preValue.getType()).getSimpleBitVector();
     auto one = builder.create<moore::ConstantOp>(loc, preValue.getType(),
@@ -117,7 +122,7 @@ struct ExprVisitor {
         isInc ? builder.create<moore::AddOp>(loc, preValue, one).getResult()
               : builder.create<moore::SubOp>(loc, preValue, one).getResult();
     builder.create<moore::BPAssignOp>(loc, arg, postValue);
-    return isPost ? preValue : postValue;
+    return postValue;
   }
 
   Value visit(const slang::ast::UnaryExpression &expr) {
@@ -314,6 +319,46 @@ struct ExprVisitor {
     return {};
   }
 
+  Value visit(const slang::ast::ConditionalExpression &expr) {
+    Value cond = convertToSimpleBitVector(
+        context.convertExpression(*expr.conditions.begin()->expr));
+    cond = convertToBool(cond);
+    if (!cond)
+      return {};
+    cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
+    auto ifOp = builder.create<mlir::scf::IfOp>(
+        loc, cond,
+        [&](OpBuilder &builder, Location loc) {
+          builder.create<mlir::scf::YieldOp>(
+              loc, context.convertExpression(expr.left()));
+        },
+        [&](OpBuilder &builder, Location loc) {
+          builder.create<mlir::scf::YieldOp>(
+              loc, context.convertExpression(expr.right()));
+        });
+    return ifOp.getResult(0);
+  }
+
+  Value visit(const slang::ast::InsideExpression &expr) {
+    auto lhs = convertToSimpleBitVector(context.convertExpression(expr.left()));
+    auto rangeList = expr.rangeList();
+    auto rhs =
+        convertToSimpleBitVector(context.convertExpression(*rangeList.front()));
+    Value preValue = builder.create<moore::EqOp>(loc, lhs, rhs);
+
+    for (unsigned long i = 1; i < rangeList.size(); i++) {
+      rhs = convertToSimpleBitVector(context.convertExpression(*rangeList[i]));
+      Value newEqOp = builder.create<moore::EqOp>(loc, lhs, rhs);
+      preValue = convertToBool(preValue);
+      newEqOp = convertToBool(newEqOp);
+      if (!preValue || !newEqOp)
+        return {};
+      preValue = builder.create<moore::OrOp>(loc, preValue, newEqOp);
+      // TODO: This should short-circuit.
+    }
+    return preValue;
+  }
+
   Value visit(const slang::ast::IntegerLiteral &expr) {
     // TODO: This is wildly unsafe and breaks for anything larger than 32 bits.
     auto value = expr.getValue().as<uint32_t>().value();
@@ -358,5 +403,5 @@ struct ExprVisitor {
 
 Value Context::convertExpression(const slang::ast::Expression &expr) {
   auto loc = convertLocation(expr.sourceRange.start());
-  return expr.visit(ExprVisitor{*this, loc, builder});
+  return expr.visit(ExprVisitor{*this, loc, builder, postValueList});
 }
