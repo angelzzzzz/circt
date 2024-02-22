@@ -57,21 +57,14 @@ struct Context {
   Operation *convertModuleHeader(const slang::ast::InstanceBodySymbol *module);
   LogicalResult convertModuleBody(const slang::ast::InstanceBodySymbol *module);
   LogicalResult walkMember(const slang::ast::Symbol &members);
+  LogicalResult
+  convertStatementBlock(const slang::ast::StatementBlockSymbol *stmt);
 
   // Convert a slang statement into an MLIR statement.
   LogicalResult convertStatement(const slang::ast::Statement *statement);
 
-  Value convertToBool(Value value, Location loc);
-
   LogicalResult
   visitConditionalStmt(const slang::ast::ConditionalStatement *conditionalStmt);
-
-  LogicalResult
-  createCase(Value caseExpr,
-             nonstd::span<slang::ast::CaseStatement::ItemGroup const> &items,
-             const slang::ast::Statement *defaultCase, unsigned long itemIndex,
-             unsigned long exprIndex, Location loc, Type type);
-  LogicalResult visitCaseStmt(const slang::ast::CaseStatement *caseStmt);
 
   void createPostValue(Location loc);
 
@@ -94,6 +87,10 @@ struct Context {
   visitOneStepDelay(const slang::ast::OneStepDelayControl *oneStepDelayControl);
   LogicalResult
   visitCycleDelay(const slang::ast::CycleDelayControl *cycleDelayControl);
+
+  void pushLValue(mlir::Value *lval);
+  void popLValue();
+  mlir::Value *getTopLValue() const;
 
   mlir::ModuleOp intoModuleOp;
   const slang::SourceManager &sourceManager;
@@ -120,6 +117,9 @@ struct Context {
   std::queue<const slang::ast::InstanceBodySymbol *> moduleWorklist;
   /// A list of value needs increment or decrement.
   std::queue<std::tuple<Value, bool>> postValueList;
+
+private:
+  std::vector<mlir::Value *> lvalueStack;
 };
 
 /// Convert a slang `SourceLocation` to an MLIR `Location`.
