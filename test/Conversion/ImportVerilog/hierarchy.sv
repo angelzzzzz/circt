@@ -29,13 +29,13 @@ package Bar;
 endpackage
 
 // CHECK-LABEL: moore.module @Parametrized
-// CHECK-NEXT:    %x = moore.variable : !moore.packed<range<logic, 41:0>>
+// CHECK:       %x = moore.variable : !moore.packed<range<logic, 41:0>>
 // CHECK-LABEL: moore.module @Parametrized_1
-// CHECK-NEXT:    %x = moore.variable : !moore.packed<range<logic, 9000:0>>
+// CHECK:       %x = moore.variable : !moore.packed<range<logic, 9000:0>>
 // CHECK-LABEL: moore.module @Parametrized_2
-// CHECK-NEXT:    %x = moore.variable : !moore.packed<range<logic, 41:0>>
+// CHECK:       %x = moore.variable : !moore.packed<range<logic, 41:0>>
 // CHECK-LABEL: moore.module @Parametrized_3
-// CHECK-NEXT:    %x = moore.variable : !moore.packed<range<logic, 9000:0>>
+// CHECK:       %x = moore.variable : !moore.packed<range<logic, 9000:0>>
 module Parametrized #(int N);
     logic [N-1:0] x;
 endmodule

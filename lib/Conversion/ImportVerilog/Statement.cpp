@@ -24,13 +24,28 @@ struct StmtVisitor {
   Context &context;
   Location loc;
   OpBuilder &builder;
+
+  /// Helper function to convert a value to its "truthy" boolean value.
+  Value convertToBool(Value value) {
+    if (!value)
+      return {};
+    if (auto type = dyn_cast_or_null<moore::IntType>(value.getType()))
+      if (type.getBitSize() == 1)
+        return value;
+    if (auto type = dyn_cast_or_null<moore::UnpackedType>(value.getType()))
+      return builder.create<moore::BoolCastOp>(loc, value);
+    mlir::emitError(loc, "expression of type ")
+        << value.getType() << " cannot be cast to a boolean";
+    return {};
+  }
+
   LogicalResult visit(const slang::ast::ConditionalStatement &conditionalStmt) {
 
     Value cond =
         context.convertExpression(*conditionalStmt.conditions.begin()->expr);
     if (!cond)
       return failure();
-    cond = builder.create<moore::BoolCastOp>(loc, cond);
+    cond = convertToBool(cond);
     cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
     // TODO: The above should probably be a `moore.bit_to_i1` op.
 
@@ -64,8 +79,10 @@ struct StmtVisitor {
   }
 
   LogicalResult visit(const slang::ast::ExpressionStatement &exprStmt) {
-    return success(context.convertExpression(
-        exprStmt.as<slang::ast::ExpressionStatement>().expr));
+    auto value = context.convertExpression(
+        exprStmt.as<slang::ast::ExpressionStatement>().expr);
+    context.createPostValue(loc);
+    return success(value);
   }
 
   LogicalResult visit(const slang::ast::StatementList &listStmt) {
@@ -327,6 +344,80 @@ struct StmtVisitor {
     return succeeded.success();
   }
 
+  LogicalResult visit(const slang::ast::CaseStatement &caseStmt) {
+    auto caseExpr = context.convertExpression(caseStmt.expr);
+    auto items = caseStmt.items;
+    const auto *defaultCase = caseStmt.defaultCase;
+
+    if (defaultCase != nullptr) {
+      // Exist default case.
+      auto itemExpr =
+          context.convertExpression(*items.front().expressions.front());
+      Value preValue = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+      auto cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(),
+                                                      preValue);
+      auto newIfOp = builder.create<mlir::scf::IfOp>(loc, cond);
+      {
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPoint(newIfOp.thenYield());
+        if (failed(context.convertStatement(items.front().stmt)))
+          return failure();
+      }
+
+      // Walk the case items and transfer preValue.
+      for (unsigned long i = 0; i < items.size(); i++) {
+        auto itemStmt = items[i].stmt;
+        for (unsigned long j = 0; j < items[i].expressions.size(); j++) {
+          if (i == 0 && j == 0)
+            continue;
+          itemExpr = context.convertExpression(*items[i].expressions[j]);
+          Value newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+
+          preValue = convertToBool(preValue);
+          newEqOp = convertToBool(newEqOp);
+          if (!preValue || !newEqOp)
+            return failure();
+          preValue = builder.create<moore::OrOp>(loc, preValue, newEqOp);
+
+          auto cond = builder.create<moore::ConversionOp>(
+              loc, builder.getI1Type(), newEqOp);
+          auto newIfOp = builder.create<mlir::scf::IfOp>(loc, cond);
+          OpBuilder::InsertionGuard guard(builder);
+          builder.setInsertionPoint(newIfOp.thenYield());
+          if (failed(context.convertStatement(itemStmt)))
+            return failure();
+        }
+      }
+
+      // Determine whether to execute the default case.
+      auto notPreValue = builder.create<moore::NotOp>(loc, preValue);
+      cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(),
+                                                 notPreValue);
+      auto ifOp = builder.create<mlir::scf::IfOp>(loc, cond);
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPoint(ifOp.thenYield());
+      if (failed(context.convertStatement(defaultCase)))
+        return failure();
+    } else {
+      // Not exist default case.
+      for (auto item : items) {
+        auto itemStmt = item.stmt;
+        for (const auto *expr : item.expressions) {
+          auto itemExpr = context.convertExpression(*expr);
+          auto newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+          auto cond = builder.create<moore::ConversionOp>(
+              loc, builder.getI1Type(), newEqOp);
+          auto ifOp = builder.create<mlir::scf::IfOp>(loc, cond);
+          OpBuilder::InsertionGuard guard(builder);
+          builder.setInsertionPoint(ifOp.thenYield());
+          if (failed(context.convertStatement(itemStmt)))
+            return failure();
+        }
+      }
+    }
+    return success();
+  }
+
   /// Emit an error for all other statement.
   template <typename T>
   LogicalResult visit(T &&node) {
@@ -341,6 +432,21 @@ struct StmtVisitor {
   }
 };
 } // namespace
+
+// Create add or sub operator after a statement.
+void Context::createPostValue(Location loc) {
+  while (!postValueList.empty()) {
+    auto value = postValueList.front();
+    auto preValue = std::get<0>(value);
+    auto one = builder.create<moore::ConstantOp>(loc, preValue.getType(), 1);
+    auto postValue =
+        std::get<1>(value)
+            ? builder.create<moore::AddOp>(loc, preValue, one).getResult()
+            : builder.create<moore::SubOp>(loc, preValue, one).getResult();
+    builder.create<moore::BPAssignOp>(loc, preValue, postValue);
+    postValueList.pop();
+  }
+}
 
 // It can handle the statements like case, conditional(if), for loop, and etc.
 LogicalResult
