@@ -110,6 +110,83 @@ struct StmtVisitor {
     return success();
   }
 
+  // Handle case statements.
+  LogicalResult visit(const slang::ast::CaseStatement &caseStmt) {
+    auto caseExpr = context.convertExpression(caseStmt.expr);
+    auto items = caseStmt.items;
+    const auto *defaultCase = caseStmt.defaultCase;
+
+    if (defaultCase != nullptr) {
+      // Exist default case.
+      auto itemExpr =
+          context.convertExpression(*items.front().expressions.front());
+      Value preValue = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+      auto cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(),
+                                                      preValue);
+      auto newIfOp = builder.create<mlir::scf::IfOp>(loc, cond);
+      {
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPoint(newIfOp.thenYield());
+        if (failed(context.convertStatement(*items.front().stmt)))
+          return failure();
+      }
+
+      // Walk the case items.
+      for (unsigned long i = 0; i < items.size(); i++) {
+        auto itemStmt = items[i].stmt;
+        for (unsigned long j = 0; j < items[i].expressions.size(); j++) {
+          if (i == 0 && j == 0)
+            continue;
+          itemExpr = context.convertExpression(*items[i].expressions[j]);
+          Value newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+
+          // Create OrOp for two results and pass preValue.
+          preValue = builder.createOrFold<moore::BoolCastOp>(loc, preValue);
+          newEqOp = builder.createOrFold<moore::BoolCastOp>(loc, newEqOp);
+          if (!preValue || !newEqOp)
+            return failure();
+          preValue = builder.create<moore::OrOp>(loc, preValue, newEqOp);
+
+          // Determine whether to execute the current case statements.
+          auto cond = builder.create<moore::ConversionOp>(
+              loc, builder.getI1Type(), newEqOp);
+          auto newIfOp = builder.create<mlir::scf::IfOp>(loc, cond);
+          OpBuilder::InsertionGuard guard(builder);
+          builder.setInsertionPoint(newIfOp.thenYield());
+          if (failed(context.convertStatement(*itemStmt)))
+            return failure();
+        }
+      }
+
+      // Determine whether to execute the default case.
+      auto notPreValue = builder.create<moore::NotOp>(loc, preValue);
+      cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(),
+                                                 notPreValue);
+      auto ifOp = builder.create<mlir::scf::IfOp>(loc, cond);
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPoint(ifOp.thenYield());
+      if (failed(context.convertStatement(*defaultCase)))
+        return failure();
+    } else {
+      // Not exist default case.
+      for (auto item : items) {
+        auto itemStmt = item.stmt;
+        for (const auto *expr : item.expressions) {
+          auto itemExpr = context.convertExpression(*expr);
+          auto newEqOp = builder.create<moore::EqOp>(loc, caseExpr, itemExpr);
+          auto cond = builder.create<moore::ConversionOp>(
+              loc, builder.getI1Type(), newEqOp);
+          auto ifOp = builder.create<mlir::scf::IfOp>(loc, cond);
+          OpBuilder::InsertionGuard guard(builder);
+          builder.setInsertionPoint(ifOp.thenYield());
+          if (failed(context.convertStatement(*itemStmt)))
+            return failure();
+        }
+      }
+    }
+    return success();
+  }
+
   // Handle `for` loops.
   LogicalResult visit(const slang::ast::ForLoopStatement &stmt) {
     if (!stmt.loopVars.empty())

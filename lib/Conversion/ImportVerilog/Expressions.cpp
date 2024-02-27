@@ -324,6 +324,48 @@ struct ExprVisitor {
     return {};
   }
 
+  // Handle conditional operator `?:`.
+  Value visit(const slang::ast::ConditionalExpression &expr) {
+    Value cond = convertToSimpleBitVector(
+        context.convertExpression(*expr.conditions.begin()->expr));
+    cond = convertToBool(cond);
+    if (!cond)
+      return {};
+    cond = builder.create<moore::ConversionOp>(loc, builder.getI1Type(), cond);
+    auto ifOp = builder.create<mlir::scf::IfOp>(
+        loc, cond,
+        [&](OpBuilder &builder, Location loc) {
+          builder.create<mlir::scf::YieldOp>(
+              loc, context.convertExpression(expr.left()));
+        },
+        [&](OpBuilder &builder, Location loc) {
+          builder.create<mlir::scf::YieldOp>(
+              loc, context.convertExpression(expr.right()));
+        });
+    return ifOp.getResult(0);
+  }
+
+  // Handle set membership operator.
+  Value visit(const slang::ast::InsideExpression &expr) {
+    auto lhs = convertToSimpleBitVector(context.convertExpression(expr.left()));
+    auto rangeList = expr.rangeList();
+    auto rhs =
+        convertToSimpleBitVector(context.convertExpression(*rangeList.front()));
+    Value preValue = builder.create<moore::EqOp>(loc, lhs, rhs);
+
+    for (unsigned long i = 1; i < rangeList.size(); i++) {
+      rhs = convertToSimpleBitVector(context.convertExpression(*rangeList[i]));
+      Value newEqOp = builder.create<moore::EqOp>(loc, lhs, rhs);
+      preValue = convertToBool(preValue);
+      newEqOp = convertToBool(newEqOp);
+      if (!preValue || !newEqOp)
+        return {};
+      preValue = builder.create<moore::OrOp>(loc, preValue, newEqOp);
+      // TODO: This should short-circuit.
+    }
+    return preValue;
+  }
+
   // Materialize a Slang integer literal as a constant op.
   Value convertSVInt(const slang::SVInt &value, Type type) {
     if (value.hasUnknown()) {

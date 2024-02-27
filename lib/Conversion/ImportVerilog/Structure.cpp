@@ -96,11 +96,13 @@ struct MemberVisitor {
 
   // Skip typedefs.
   LogicalResult visit(const slang::ast::TypeAliasType &) { return success(); }
-
-  // Skip parameters. The AST is already monomorphized.
-  LogicalResult visit(const slang::ast::ParameterSymbol &) { return success(); }
   LogicalResult visit(const slang::ast::TypeParameterSymbol &) {
     return success();
+  }
+
+  // Skip genvar.
+  LogicalResult visit(const slang::ast::GenvarSymbol &) {
+    return mlir::success();
   }
 
   // Handle instances.
@@ -208,6 +210,59 @@ struct MemberVisitor {
   // expected, but will also create a `StatementBlockSymbol` with just the
   // variable layout _next to_ the initial procedure.
   LogicalResult visit(const slang::ast::StatementBlockSymbol &) {
+    return success();
+  }
+
+  // Handle parameters
+  LogicalResult visit(const slang::ast::ParameterSymbol &paramNode) {
+    auto type = context.convertType(*paramNode.getDeclaredType());
+    if (!type)
+      return failure();
+    auto value = *paramNode.getValue().integer().getRawPtr();
+    auto namedConstantOp = builder.create<moore::NamedConstantOp>(
+        loc, type, builder.getStringAttr(paramNode.name),
+        paramNode.isLocalParam()
+            ? moore::NamedConstAttr::get(context.getContext(),
+                                         moore::NamedConst::LocalParameter)
+            : moore::NamedConstAttr::get(context.getContext(),
+                                         moore::NamedConst::Parameter),
+        builder.getI64IntegerAttr(value));
+    context.valueSymbols.insert(&paramNode, namedConstantOp);
+    return success();
+  }
+
+  // Handle specparam
+  LogicalResult visit(const slang::ast::SpecparamSymbol &spNode) {
+    auto type = context.convertType(*spNode.getDeclaredType());
+    if (!type)
+      return failure();
+    auto value = *spNode.getValue().integer().getRawPtr();
+    auto namedConstantOp = builder.create<moore::NamedConstantOp>(
+        loc, type, builder.getStringAttr(spNode.name),
+        moore::NamedConstAttr::get(context.getContext(),
+                                   moore::NamedConst::SpecParameter),
+        builder.getI64IntegerAttr(value));
+    context.valueSymbols.insert(&spNode, namedConstantOp);
+    return success();
+  }
+
+  // Handle GenerateBlock
+  LogicalResult visit(const slang::ast::GenerateBlockSymbol &genNode) {
+    if (!genNode.isUninstantiated) {
+      for (auto &member : genNode.members()) {
+        if (failed(member.visit(MemberVisitor(context, loc))))
+          return failure();
+      }
+    }
+    return success();
+  }
+
+  // Handle GenerateBlockArray
+  LogicalResult visit(const slang::ast::GenerateBlockArraySymbol &genArrNode) {
+    for (const auto *member : genArrNode.entries) {
+      if (failed(member->asSymbol().visit(MemberVisitor(context, loc))))
+        return failure();
+    }
     return success();
   }
 
