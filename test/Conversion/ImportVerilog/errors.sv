@@ -177,3 +177,21 @@ module Foo;
     automatic int b;
   end
 endmodule
+
+// -----
+
+module Foo;
+  int a, b;
+  initial begin
+    // expected-warning @below {{reversed range will behave as if it were empty [-Wreversed-range]}}
+    c = a inside { [1:-1] };
+    // expected-error @below {{literals with X or Z bits not supported}}
+    c = 'x inside { a };
+    // expected-error @below {{literals with X or Z bits not supported}}
+    c = a inside { 'z, a };
+    // expected-error @below {{literals with X or Z bits not supported}}
+    c = a inside { a, ['x:b] };
+    // expected-error @below {{literals with X or Z bits not supported}}
+    c = a inside { a, [b:'z] };
+  end
+endmodule

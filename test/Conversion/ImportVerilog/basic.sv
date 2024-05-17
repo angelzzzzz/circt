@@ -535,6 +535,44 @@ module Expressions;
     // CHECK: moore.shr %u, %b : !moore.i32, !moore.i32
     c = u >>> b;
 
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP2:%.+]] = moore.conversion [[TMP1]] : !moore.i1 -> !moore.l32
+    // CHECK: [[TMP3:%.+]] = moore.conversion [[TMP2]] : !moore.l32 -> !moore.i32
+    // CHECK: moore.blocking_assign %c, [[TMP3]] : !moore.i32
+    c = a inside { a };
+
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP2:%.+]] = moore.eq %a, %b : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP3:%.+]] = moore.or [[TMP1]], [[TMP2]] : !moore.i1
+    // CHECK: [[TMP4:%.+]] = moore.conversion [[TMP3]] : !moore.i1 -> !moore.l32
+    // CHECK: [[TMP5:%.+]] = moore.conversion [[TMP4]] : !moore.l32 -> !moore.i32
+    // CHECK: moore.blocking_assign %c, [[TMP5]] : !moore.i32
+    c = a inside { a, b };
+
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP2:%.+]] = moore.eq %a, %b : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP3:%.+]] = moore.eq %a, %a : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP4:%.+]] = moore.eq %a, %b : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP5:%.+]] = moore.or [[TMP3]], [[TMP4]] : !moore.i1
+    // CHECK: [[TMP6:%.+]] = moore.or [[TMP2]], [[TMP5]] : !moore.i1
+    // CHECK: [[TMP7:%.+]] = moore.or [[TMP1]], [[TMP6]] : !moore.i1
+    // CHECK: [[TMP8:%.+]] = moore.conversion [[TMP7]] : !moore.i1 -> !moore.l32
+    // CHECK: [[TMP9:%.+]] = moore.conversion [[TMP8]] : !moore.l32 -> !moore.i32
+    // CHECK: moore.blocking_assign %c, [[TMP9]] : !moore.i32
+    c = a inside { a, b, a, b };
+
+    // CHECK: [[TMP1:%.+]] = moore.eq %a, %a : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP2:%.+]] = moore.eq %a, %b : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP3:%.+]] = moore.sge %a, %a : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP4:%.+]] = moore.sle %a, %b : !moore.i32 -> !moore.i1
+    // CHECK: [[TMP5:%.+]] = moore.and [[TMP3]], [[TMP4]] : !moore.i1
+    // CHECK: [[TMP6:%.+]] = moore.or [[TMP2]], [[TMP5]] : !moore.i1
+    // CHECK: [[TMP7:%.+]] = moore.or [[TMP1]], [[TMP6]] : !moore.i1
+    // CHECK: [[TMP8:%.+]] = moore.conversion [[TMP7]] : !moore.i1 -> !moore.l32
+    // CHECK: [[TMP9:%.+]] = moore.conversion [[TMP8]] : !moore.l32 -> !moore.i32
+    // CHECK: moore.blocking_assign %c, [[TMP9]] : !moore.i32
+    c = a inside { a, b, [a:b] };
+
     //===------------------------------------------------------------------===//
     // Assign operators
 
